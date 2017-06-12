@@ -295,22 +295,22 @@ class Seq2SeqModel():
                 )
             )
 
-            # self.decoder_logits_train = output_fn(self.decoder_outputs_train)
-            # self.decoder_prediction_train = tf.argmax(self.decoder_logits_train, axis=-1, name='decoder_prediction_train')
+            self.decoder_logits_train = output_fn(self.decoder_outputs_train)
+            self.decoder_prediction_train = tf.argmax(self.decoder_logits_train, axis=-1, name='decoder_prediction_train')
 
-            # scope.reuse_variables()
+            scope.reuse_variables()
 
-            # (self.decoder_logits_inference,
-            #  self.decoder_state_inference,
-            #  self.decoder_context_state_inference) = (
-            #     seq2seq.dynamic_rnn_decoder(
-            #         cell=self.decoder_cell,
-            #         decoder_fn=decoder_fn_inference,
-            #         time_major=True,
-            #         scope=scope,
-            #     )
-            # )
-            # self.decoder_prediction_inference = tf.argmax(self.decoder_logits_inference, axis=-1, name='decoder_prediction_inference')
+            (self.decoder_logits_inference,
+             self.decoder_state_inference,
+             self.decoder_context_state_inference) = (
+                seq2seq.dynamic_rnn_decoder(
+                    cell=self.decoder_cell,
+                    decoder_fn=decoder_fn_inference,
+                    time_major=True,
+                    scope=scope,
+                )
+            )
+            self.decoder_prediction_inference = tf.argmax(self.decoder_logits_inference, axis=-1, name='decoder_prediction_inference')
 
     def _init_optimizer(self):
         # logits  = tf.transpose(self.decoder_logits_train, [1, 0, 2])

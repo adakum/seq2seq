@@ -16,13 +16,13 @@ with tf.Session() as session:
                          decoder_cell=LSTMCell(20), 
                          vocab_size=10,
                          embedding_size=10,
-                         attention=False,
+                         attention=True,
                          dropout=None,
                          bidirectional=True,
                          EOS_ID = 0,
                          PAD_ID = 1,
                          GO_ID  = 2,
-                         num_layers=2)
+                         num_layers=1)
     session.run(tf.global_variables_initializer())
     names = [v.name for v in tf.trainable_variables()]
     for name in names:
