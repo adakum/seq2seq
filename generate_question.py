@@ -22,22 +22,22 @@ with tf.Session() as session:
                          EOS_ID = 0,
                          PAD_ID = 1,
                          GO_ID  = 2,
-                         num_layers=1)
+                         num_layers=2)
     session.run(tf.global_variables_initializer())
     names = [v.name for v in tf.trainable_variables()]
     for name in names:
     	print(name)
 
-    # train(session, model,
-    #                    length_from=3, length_to=8,
-    #                    vocab_lower=2, vocab_upper=10,
-    #                    batch_size=10,
-    #                    max_batches=3000,
-    #                    batches_in_epoch=100,
-    #                    verbose=True,
-    #                    input_keep_prob=0.8,
-    #                    output_keep_prob=0.8,
-    #                    state_keep_prob=1)
+    train(session, model,
+                       length_from=3, length_to=8,
+                       vocab_lower=2, vocab_upper=10,
+                       batch_size=10,
+                       max_batches=3000,
+                       batches_in_epoch=100,
+                       verbose=True,
+                       input_keep_prob=0.8,
+                       output_keep_prob=0.8,
+                       state_keep_prob=1)
 
     # a = helpers.random_sequences(length_from=3, length_to=8,vocab_lower=2, vocab_upper=10,batch_size =100)
     # print(a)
