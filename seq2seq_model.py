@@ -221,6 +221,7 @@ class Seq2SeqModel():
 
             print("Encoder State")
             print(self.encoder_state)
+
     def _init_decoder(self):
         with tf.variable_scope("Decoder") as scope:
             def output_fn(outputs):
