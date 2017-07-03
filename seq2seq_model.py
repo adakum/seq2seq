@@ -11,8 +11,6 @@ class Seq2SeqModel():
     """Seq2Seq model usign blocks from new `tf.contrib.seq2seq`.
     Requires TF 1.0.0-alpha"""
 
-    # PAD = "<PAD>"
-    # EOS = "EOS"
 
     def __init__(self, encoder_cell, decoder_cell, vocab_size, embedding_size,
                  bidirectional=True,
@@ -63,7 +61,7 @@ class Seq2SeqModel():
 
         self._init_decoder()
 
-        # self._init_optimizer()
+        self._init_optimizer()
 
     def _init_cells(self):
 
@@ -205,22 +203,34 @@ class Seq2SeqModel():
 
             self.encoder_outputs = tf.concat((encoder_fw_outputs, encoder_bw_outputs), 2)
             print(self.encoder_outputs)
+
+
+            self.encoder_state = []
+
+            for i in range(self.num_layers):
+                if isinstance(encoder_fw_state[i], LSTMStateTuple):
+                    print("blah")
+                    encoder_state_c = tf.concat((encoder_fw_state[i].c, encoder_bw_state[i].c), 1, name='bidirectional_concat_c')
+                    encoder_state_h = tf.concat((encoder_fw_state[i].h, encoder_bw_state[i].h), 1, name='bidirectional_concat_h')
+                    encoder_state = LSTMStateTuple(c=encoder_state_c, h=encoder_state_h)
+                elif isinstance(encoder_fw_state[i], tf.Tensor):
+                    encoder_state = tf.concat((encoder_fw_state[i], encoder_bw_state[i]), 1, name='bidirectional_concat')
+                self.encoder_state.append(encoder_state)
+
+            self.encoder_state = tuple(self.encoder_state)
             
-            if self.num_layers>1:
-                self.encoder_state   = tf.concat((encoder_fw_state, encoder_bw_state), -1)
-                self.encoder_state   = tf.transpose(self.encoder_state, perm=[2,0,1,3])
+            # if self.num_layers>1:
+            #     self.encoder_state   = tf.concat((encoder_fw_state, encoder_bw_state), -1)
+            #     # self.encoder_state   = tf.transpose(self.encoder_state, perm=[2,0,1,3])
 
-            elif isinstance(encoder_fw_state, LSTMStateTuple):
-                print("blah")
-                encoder_state_c = tf.concat((encoder_fw_state.c, encoder_bw_state.c), 1, name ='bidirectional_concat_c')
-                encoder_state_h = tf.concat((encoder_fw_state.h, encoder_bw_state.h), 1, name ='bidirectional_concat_h')
-                self.encoder_state = LSTMStateTuple(c=encoder_state_c, h=encoder_state_h)
+            # elif isinstance(encoder_fw_state, LSTMStateTuple):
+            #     print("blah")
+            #     encoder_state_c = tf.concat((encoder_fw_state.c, encoder_bw_state.c), 1, name ='bidirectional_concat_c')
+            #     encoder_state_h = tf.concat((encoder_fw_state.h, encoder_bw_state.h), 1, name ='bidirectional_concat_h')
+            #     self.encoder_state = LSTMStateTuple(c=encoder_state_c, h=encoder_state_h)
 
-            elif isinstance(encoder_fw_state, tf.Tensor):
-                self.encoder_state = tf.concat((encoder_fw_state, encoder_bw_state), 1, name  ='bidirectional_concat')
-
-            print("Encoder State")
-            print(self.encoder_state)
+            # elif isinstance(encoder_fw_state, tf.Tensor):
+            #     self.encoder_state = tf.concat((encoder_fw_state, encoder_bw_state), 1, name  ='bidirectional_concat')
 
     def _init_decoder(self):
         with tf.variable_scope("Decoder") as scope:
