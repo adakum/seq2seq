@@ -11,8 +11,6 @@ class Seq2SeqModel():
     """Seq2Seq model usign blocks from new `tf.contrib.seq2seq`.
     Requires TF 1.0.0-alpha"""
 
-    # PAD = "<PAD>"
-    # EOS = "EOS"
 
     def __init__(self, encoder_cell, decoder_cell, vocab_size, embedding_size,
                  bidirectional=True,
