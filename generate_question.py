@@ -5,6 +5,7 @@ from seq2seq_model import Seq2SeqModel, train
 import pandas as pd
 import helpers
 
+
 tf.reset_default_graph()
 tf.set_random_seed(1)
 
@@ -12,8 +13,7 @@ with tf.Session() as session:
 
     # with bidirectional encoder, decoder state size should be
     # 2x encoder state size
-    model = Seq2SeqModel(encoder_cell=LSTMCell(10),
-                         decoder_cell=LSTMCell(20), 
+    model = Seq2SeqModel(encoder_cell_size=20,
                          vocab_size=10,
                          embedding_size=10,
                          attention=True,
@@ -32,7 +32,7 @@ with tf.Session() as session:
                        length_from=3, length_to=8,
                        vocab_lower=2, vocab_upper=10,
                        batch_size=10,
-                       max_batches=3000,
+                       max_batches=5000,
                        batches_in_epoch=100,
                        verbose=True,
                        input_keep_prob=0.8,
