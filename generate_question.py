@@ -15,8 +15,8 @@ tf.app.flags.DEFINE_float("max_gradient_norm", 5.0, "Clip gradients to this norm
 tf.app.flags.DEFINE_integer("batch_size", 128,"Batch size to use during training.")
 tf.app.flags.DEFINE_integer("size", 1024, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("num_layers", 4, "Number of layers in the model.")
-tf.app.flags.DEFINE_integer("query_vocab_size", 150000, "English vocabulary size.")
-tf.app.flags.DEFINE_integer("question_vocab_size", 150000, "French vocabulary size.")
+tf.app.flags.DEFINE_integer("en_vocab_size", 150000, "English vocabulary size.")
+tf.app.flags.DEFINE_integer("fr_vocab_size", 150000, "French vocabulary size.")
 tf.app.flags.DEFINE_integer("num_samples", 512, "Num samples for sampled softmax.")
 
 tf.app.flags.DEFINE_integer("dropout",None,"use dropout or not")
@@ -60,8 +60,8 @@ print("max_gradient_norm = %d" %  FLAGS.max_gradient_norm)
 print("batch_size = %d" %  FLAGS.batch_size)
 print("num_layers = %d" %  FLAGS.num_layers)
 print("hidden_size = %d" %  FLAGS.size)
-print("en_vocab_size = %d" %  FLAGS.query_vocab_size)
-print("fr_vocab_size = %d" %  FLAGS.question_vocab_size)
+print("en_vocab_size = %d" %  FLAGS.en_vocab_size)
+print("fr_vocab_size = %d" %  FLAGS.fr_vocab_size)
 print("num_samples = %d" %  FLAGS.num_samples)
 print("_buckets = %s" %  _buckets)
 print("steps_per_checkpoint = %d" %  FLAGS.steps_per_checkpoint)
@@ -77,7 +77,7 @@ if not os.path.exists(FLAGS.model_dir):
   os.makedirs(FLAGS.model_dir)
   print("Created Folder !")
 
-print("..................... Printing Parameters end .....................")
+print(".................... Printing Parameters end .....................")
 
 
 def create_model(session):
@@ -89,10 +89,10 @@ def create_model(session):
   # max gradient norm
 
   model = Seq2SeqModel(encoder_cell_size=FLAGS.size,
-                         vocab_size=FLAGS.query_vocab_size,
+                         vocab_size=FLAGS.en_vocab_size,
                          embedding_size=FLAGS.embedding_size,
                          attention=FLAGS.use_attention,
-                         dropout=FLAGS.droput,
+                         dropout=FLAGS.dropout,
                          bidirectional=FLAGS.use_bidirectional,
                          EOS_ID = 0,
                          PAD_ID = 1,
@@ -126,7 +126,7 @@ def create_model(session):
 
 def train():
   print("Preparing Q2Q data in %s" % FLAGS.data_dir)
-  query_train, question_train, query_dev, question_dev, _, _ = data_utils.prepare_q2q_data(FLAGS.data_dir, FLAGS.query_vocab_size, FLAGS.question_vocab_size)
+  en_train, fr_train, en_dev, fr_dev, _, _ = data_utils.prepare_q2q_data(FLAGS.data_dir, FLAGS.en_vocab_size, FLAGS.fr_vocab_size)
 
   with tf.Session() as sess:
     # Create model.
@@ -134,14 +134,104 @@ def train():
     model = create_model(sess, False)
     # Read data into buckets and compute their sizes.
     print ("Reading development and training data (limit: %d)."% FLAGS.max_train_data_size)
-    print("query_dev Path : " + en_dev )
-    print("question_dev Path : " + fr_dev )
+    print("en_dev Path : " + en_dev )
+    print("fr_dev Path : " + fr_dev )
     dev_set = read_data(en_dev, fr_dev)
     dev_bucket_sizes = [len(dev_set[b]) for b in xrange(len(_buckets))]
     print("Development Data read ! ")
     train_set = read_data(en_train, fr_train, FLAGS.max_train_data_size)
     print("Training Data read")
     train_bucket_sizes = [len(train_set[b]) for b in xrange(len(_buckets))]
+
+    print("**** Bucket Sizes :  ")
+    print(dev_bucket_sizes)
+    print(train_bucket_sizes)
+    print("****")
+
+    train_total_size = float(sum(train_bucket_sizes))
+
+    # A bucket scale is a list of increasing numbers from 0 to 1 that we'll use
+    # to select a bucket. Length of [scale[i], scale[i+1]] is proportional to
+    # the size if i-th training bucket, as used later.
+    train_buckets_scale = [sum(train_bucket_sizes[:i + 1]) / train_total_size
+                           for i in xrange(len(train_bucket_sizes))]
+
+    # This is the training loop.
+    step_time, loss = 0.0, 0.0
+    current_step = 0
+    previous_losses = []
+    model_checkpoint_list = [] # maintain list of past checkpoints
+    min_eval_perplex = collections.defaultdict(float)
+    
+    for bucket_id in xrange(len(_buckets)):
+      min_eval_perplex[bucket_id] = float("inf")
+
+    while current_step < MAX_ITERATION_COUNT:
+      # Choose a bucket according to data distribution. We pick a random number
+      # in [0, 1] and use the corresponding interval in train_buckets_scale.
+      
+      # print(current_step)
+      random_number_01 = np.random.random_sample()
+      bucket_id = min([i for i in xrange(len(train_buckets_scale))
+                       if train_buckets_scale[i] > random_number_01])
+
+      # Get a batch and make a step.
+      start_time = time.time()
+      encoder_inputs, decoder_inputs, target_weights = model.get_batch(train_set, bucket_id)
+      _, step_loss, _ = model.step(sess, encoder_inputs, decoder_inputs, target_weights, bucket_id, False)
+      step_time += (time.time() - start_time) / FLAGS.steps_per_checkpoint
+      loss += step_loss / FLAGS.steps_per_checkpoint
+      current_step += 1
+
+      # Once in a while, we save checkpoint, print statistics, and run evals.
+      if current_step % FLAGS.steps_per_checkpoint == 0:
+        num = (current_step/MAX_ITERATION_COUNT)*100
+        print()
+        print('LOSS : %.2f%%' % loss)
+        print()
+        print('PROGRESS: %.2f%%' % num)
+        print()
+        # Print statistics for the previous epoch.
+        perplexity = math.exp(loss) if loss < 300 else float('inf')
+        print ("global step %d learning rate %.4f step-time %.2f perplexity "
+               "%.2f" % (model.global_step.eval(), model.learning_rate.eval(),
+                         step_time, perplexity))
+        # Decrease learning rate if no improvement was seen over last 3 times.
+        if len(previous_losses) > 2 and loss > max(previous_losses[-3:]):
+          sess.run(model.learning_rate_decay_op)
+        previous_losses.append(loss)
+        # Save checkpoint and zero timer and loss.
+        if FLAGS.local is False:
+          tmp_model_checkpoint_path = os.path.join(FLAGS.tmp_model_folder, "model.ckpt-" + str(current_step))
+          # model_checkpoint_path = os.path.join(FLAGS.model_dir, "model.ckpt-" + str(current_step))
+          model_checkpoint_path = os.path.join(FLAGS.model_dir, "my-model")
+          tmp_checkpoint_path   = os.path.join(FLAGS.tmp_model_folder, "checkpoint")
+          # checkpoint_path = os.path.join("/hdfs/pnrsy/sys/jobs", os.environ['PHILLY_JOB_ID'], "models", "translate.ckpt")
+          checkpoint_path = os.path.join(FLAGS.model_dir, "checkpoint")
+
+          if not os.path.exists(FLAGS.model_dir):
+            os.makedirs(FLAGS.model_dir)
+            print("Created Folder !")
+          try:
+            # print(tmp_checkpoint_path)
+            # print(tmp_model_checkpoint_path)
+            print(model_checkpoint_path)
+            model.saver.save(sess, model_checkpoint_path, global_step=model.global_step)
+            print("Saved Model")
+            # model_checkpoint_list.append(model_checkpoint_path)
+          except Exception as e:
+           print("FAILED TO COPY FOR CHECKPOINT FOR FILE %s" % model_checkpoint_path)
+           try:
+             print(e.message)
+           except Exception as ee:
+             print("NO EXCEPTION MESSAGE")
+          if len(model_checkpoint_list) > 5:
+            os.remove(model_checkpoint_list[0])
+            model_checkpoint_list.pop(0)
+        else:
+          checkpoint_path = os.path.join(FLAGS.train_dir, "translate.ckpt")
+          # model.saver.save(sess, checkpoint_path, global_step=model.global_step)
+
 
 
 
