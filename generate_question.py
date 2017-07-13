@@ -12,13 +12,13 @@ tf.set_random_seed(1)
 tf.app.flags.DEFINE_float("learning_rate", 2, "Learning rate.")
 tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.95,"Learning rate decays by this much.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 5.0, "Clip gradients to this norm.")
-tf.app.flags.DEFINE_integer("batch_size", 128,"Batch size to use during training.")
-tf.app.flags.DEFINE_integer("size", 512, "Size of each model layer.")
+tf.app.flags.DEFINE_integer("batch_size", 20,"Batch size to use during training.")
+tf.app.flags.DEFINE_integer("size", 10, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("num_layers", 2, "Number of layers in the model.")
-tf.app.flags.DEFINE_integer("en_vocab_size", 150000, "English vocabulary size.")
-tf.app.flags.DEFINE_integer("fr_vocab_size", 150000, "French vocabulary size.")
+tf.app.flags.DEFINE_integer("en_vocab_size", 10, "English vocabulary size.")
+tf.app.flags.DEFINE_integer("fr_vocab_size", 10, "French vocabulary size.")
 tf.app.flags.DEFINE_integer("num_samples", 512, "Num samples for sampled softmax.")
-tf.app.flags.DEFINE_integer("embedding_size", 300, "Num samples for sampled softmax.")
+tf.app.flags.DEFINE_integer("embedding_size", 10, "Num samples for sampled softmax.")
 
 tf.app.flags.DEFINE_integer("dropout",None,"use dropout or not")
 tf.app.flags.DEFINE_integer("input_keep_prob",  1,"use dropout or not")
@@ -135,9 +135,6 @@ def create_model(session):
                          attention=FLAGS.use_attention,
                          dropout=FLAGS.dropout,
                          bidirectional=FLAGS.use_bidirectional,
-                         EOS_ID = 0,
-                         PAD_ID = 1,
-                         GO_ID  = 2,
                          num_layers = FLAGS.num_layers)
 
   # model = Seq2SeqModel(
@@ -231,15 +228,15 @@ def train():
       fd = model.make_input_data_feed_dict(encoder_inputs, encoder_input_len, decoder_inputs, decoder_targets, decoder_input_len, loss_weights, FLAGS.input_keep_prob, FLAGS.output_keep_prob, FLAGS.state_keep_prob)
       # fd_inference = model.make_inference_inputs_II(encoder_inputs, encoder_input_len)
       # run model 
-      l,d,e,f = sess.run([model.encoder_inputs_embedded, model.decoder_prediction_train, model.decoder_logits_train, model.decoder_outputs_train], fd)
+      l,d = sess.run([model.decoder_logits_train, model.decoder_train_targets], fd)
+      # print(l)
       print(np.shape(l))
       print(np.shape(d))
-      print(np.shape(e))
-      print(np.shape(f))
+      # print(np.shape(f))
+      m = sess.run([model.loss], fd)
 
-      # print(time.sleep(2))
       break
-      # loss_track.append(l)
+      loss_track.append(l)
       
        
       # # print extra info

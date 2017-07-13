@@ -17,9 +17,9 @@ class Seq2SeqModel():
                  attention=False,
                  debug=False,
                  dropout=None,
-                 EOS_ID=0,
-                 PAD_ID=1,
-                 GO_ID =2,
+                 PAD_ID=0,
+                 GO_ID =1,
+                 EOS_ID=2,
                  num_layers=1):
 
         # self.debug = debug
@@ -102,12 +102,12 @@ class Seq2SeqModel():
             name='encoder_inputs_length',)
         
         self.decoder_train_inputs = tf.placeholder(
-            shape = [None, None],
+            shape = (None, None),
             dtype = tf.int32,
             name = 'decoder_train_inputs',)
 
         self.decoder_train_targets = tf.placeholder(
-            shape = [None, None],
+            shape = (None, None),
             dtype = tf.int32,
             name = 'decoder_train_targets')
 
@@ -117,7 +117,7 @@ class Seq2SeqModel():
             name  = 'decoder_train_length')
 
         self.loss_weights = tf.placeholder(
-            shape = [None, None],
+            shape = (None, None),
             dtype = tf.float32,
             name = 'loss_weights')
 
@@ -341,12 +341,8 @@ class Seq2SeqModel():
             self.decoder_prediction_inference = tf.argmax(self.decoder_logits_inference, axis=-1, name='decoder_prediction_inference')
 
     def _init_optimizer(self):
-        # logits  = tf.transpose(self.decoder_logits_train, [1, 0, 2])
         logits  = self.decoder_logits_train
-        # targets = tf.transpose(self.decoder_train_targets, [1, 0])
-        print(logits)
         targets = self.decoder_train_targets
-        print(targets)
         self.loss     = seq2seq.sequence_loss(logits=logits, targets=targets, weights=self.loss_weights)
         self.train_op = tf.train.AdamOptimizer().minimize(self.loss)
 
@@ -373,7 +369,6 @@ class Seq2SeqModel():
             # self.state_keep_prob  : state_keep_prob
         }
     def make_input_data_feed_dict(self, encoder_inputs, encoder_input_len,  decoder_inputs, decoder_targets, decoder_input_len, loss_weights, input_keep_prob, output_keep_prob, state_keep_prob):
-        print(np.shape(decoder_targets))
         return{
             self.encoder_inputs : encoder_inputs,
             self.encoder_inputs_length :  encoder_input_len,
