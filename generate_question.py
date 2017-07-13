@@ -1,11 +1,11 @@
+import os,sys,time
 import numpy as np
 import tensorflow as tf
 from tensorflow.contrib.rnn import LSTMCell, GRUCell
-from seq2seq_model import Seq2SeqModel, train
+from seq2seq_model import Seq2SeqModel#, train
 import pandas as pd
 import helpers
-
-
+import data_utils 
 tf.reset_default_graph()
 tf.set_random_seed(1)
 
@@ -13,24 +13,27 @@ tf.app.flags.DEFINE_float("learning_rate", 2, "Learning rate.")
 tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.95,"Learning rate decays by this much.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 5.0, "Clip gradients to this norm.")
 tf.app.flags.DEFINE_integer("batch_size", 128,"Batch size to use during training.")
-tf.app.flags.DEFINE_integer("size", 1024, "Size of each model layer.")
-tf.app.flags.DEFINE_integer("num_layers", 4, "Number of layers in the model.")
+tf.app.flags.DEFINE_integer("size", 512, "Size of each model layer.")
+tf.app.flags.DEFINE_integer("num_layers", 2, "Number of layers in the model.")
 tf.app.flags.DEFINE_integer("en_vocab_size", 150000, "English vocabulary size.")
 tf.app.flags.DEFINE_integer("fr_vocab_size", 150000, "French vocabulary size.")
 tf.app.flags.DEFINE_integer("num_samples", 512, "Num samples for sampled softmax.")
+tf.app.flags.DEFINE_integer("embedding_size", 300, "Num samples for sampled softmax.")
 
 tf.app.flags.DEFINE_integer("dropout",None,"use dropout or not")
-tf.app.flags.DEFINE_integer( "input_keep_prob",  1,"use dropout or not")
+tf.app.flags.DEFINE_integer("input_keep_prob",  1,"use dropout or not")
 tf.app.flags.DEFINE_integer("output_keep_prob", 1 ,"use dropout or not")
+tf.app.flags.DEFINE_integer("state_keep_prob", 1 ,"use dropout or not")
 
-tf.app.flags.DEFINE_integer("use_attention",True,"use attention or not")
+
+tf.app.flags.DEFINE_integer("use_attention", True,"use attention or not")
 tf.app.flags.DEFINE_integer("use_bidirectional", True,"use bi-directional or not")
 
 tf.app.flags.DEFINE_integer("max_train_data_size",  0, "Limit on the size of training data (0: no limit).")
 tf.app.flags.DEFINE_integer("steps_per_checkpoint", 1500, "How many training steps to do per checkpoint.")
 tf.app.flags.DEFINE_boolean("decode", False, "Set to True for interactive decoding.")
 tf.app.flags.DEFINE_boolean("self_test", False, "Run a self-test if this is set to True.")
-tf.app.flags.DEFINE_integer("total_epoch",6, "Number of epoch to run")
+tf.app.flags.DEFINE_integer("total_epoch", 6, "Number of epoch to run")
 tf.app.flags.DEFINE_integer("data_size", 13000000, "Size of Data")
 
 # added flags for Philly use
@@ -49,7 +52,6 @@ FLAGS = tf.app.flags.FLAGS
 _buckets = [(3, 7), (5, 12), (7, 17), (9, 20)]
 
 print("TF Version : %s", tf.__version__)
-
 
 
 print(".....................Printing Parameters.........................")
@@ -78,6 +80,45 @@ if not os.path.exists(FLAGS.model_dir):
   print("Created Folder !")
 
 print(".................... Printing Parameters end .....................")
+
+def read_data(source_path, target_path, max_size=None):
+  """Read data from source and target files and put into buckets.
+
+  Args:
+    source_path: path to the files with token-ids for the source language.
+    target_path: path to the file with token-ids for the target language;
+      it must be aligned with the source file: n-th line contains the desired
+      output for n-th line from the source_path.
+    max_size: maximum number of lines to read, all other will be ignored;
+      if 0 or None, data files will be read completely (no limit).
+
+  Returns:
+    data_set: a list of length len(_buckets); data_set[n] contains a list of
+      (source, target) pairs read from the provided data files that fit
+      into the n-th bucket, i.e., such that len(source) < _buckets[n][0] and
+      len(target) < _buckets[n][1]; source and target are lists of token-ids.
+  """
+  data_set = [[] for _ in _buckets]
+  with tf.gfile.GFile(source_path, mode="r") as source_file:
+    with tf.gfile.GFile(target_path, mode="r") as target_file:
+      source, target = source_file.readline(), target_file.readline()
+      counter = 0
+      while source and target and (not max_size or counter < max_size):
+        counter += 1
+        if counter % 100000 == 0:
+          print("  reading data line %d" % counter)
+          sys.stdout.flush()
+        source_ids = [int(x) for x in source.split()]
+        target_ids = [int(x) for x in target.split()]
+        # not adding now,  will add in get_batch 
+        # target_ids.append(data_utils.EOS_ID)
+        for bucket_id, (source_size, target_size) in enumerate(_buckets):
+          #  (len(target_ids) + 1) --> Added 1 to compensate for EOS or GO which is going to get added in get_batch part
+          if len(source_ids) < source_size and (len(target_ids) + 1)< target_size:
+            data_set[bucket_id].append([source_ids, target_ids])
+            break
+        source, target = source_file.readline(), target_file.readline()
+  return data_set
 
 
 def create_model(session):
@@ -118,7 +159,7 @@ def create_model(session):
     print("Master, Parameters Read !!")
   except Exception as e:
     print("Master, Creating model with fresh parameters.")
-    session.run(tf.initialize_all_variables())
+    session.run(tf.global_variables_initializer())
     print("Master, Created model with fresh parameters.")
   
   return model
@@ -131,17 +172,17 @@ def train():
   with tf.Session() as sess:
     # Create model.
     print("Creating Model")
-    model = create_model(sess, False)
+    model = create_model(sess)
     # Read data into buckets and compute their sizes.
     print ("Reading development and training data (limit: %d)."% FLAGS.max_train_data_size)
     print("en_dev Path : " + en_dev )
     print("fr_dev Path : " + fr_dev )
     dev_set = read_data(en_dev, fr_dev)
-    dev_bucket_sizes = [len(dev_set[b]) for b in xrange(len(_buckets))]
-    print("Development Data read ! ")
+    dev_bucket_sizes = [len(dev_set[b]) for b in range(len(_buckets))]
+    print("Development Data read !")
     train_set = read_data(en_train, fr_train, FLAGS.max_train_data_size)
     print("Training Data read")
-    train_bucket_sizes = [len(train_set[b]) for b in xrange(len(_buckets))]
+    train_bucket_sizes = [len(train_set[b]) for b in range(len(_buckets))]
 
     print("**** Bucket Sizes :  ")
     print(dev_bucket_sizes)
@@ -154,17 +195,13 @@ def train():
     # to select a bucket. Length of [scale[i], scale[i+1]] is proportional to
     # the size if i-th training bucket, as used later.
     train_buckets_scale = [sum(train_bucket_sizes[:i + 1]) / train_total_size
-                           for i in xrange(len(train_bucket_sizes))]
+                           for i in range(len(train_bucket_sizes))]
 
     # This is the training loop.
     step_time, loss = 0.0, 0.0
     current_step = 0
     previous_losses = []
     model_checkpoint_list = [] # maintain list of past checkpoints
-    min_eval_perplex = collections.defaultdict(float)
-    
-    for bucket_id in xrange(len(_buckets)):
-      min_eval_perplex[bucket_id] = float("inf")
 
     while current_step < MAX_ITERATION_COUNT:
       # Choose a bucket according to data distribution. We pick a random number
@@ -172,68 +209,108 @@ def train():
       
       # print(current_step)
       random_number_01 = np.random.random_sample()
-      bucket_id = min([i for i in xrange(len(train_buckets_scale))
+      bucket_id = min([i for i in range(len(train_buckets_scale))
                        if train_buckets_scale[i] > random_number_01])
 
       # Get a batch and make a step.
       start_time = time.time()
-      encoder_inputs, decoder_inputs, target_weights = model.get_batch(train_set, bucket_id)
-      _, step_loss, _ = model.step(sess, encoder_inputs, decoder_inputs, target_weights, bucket_id, False)
-      step_time += (time.time() - start_time) / FLAGS.steps_per_checkpoint
-      loss += step_loss / FLAGS.steps_per_checkpoint
-      current_step += 1
 
-      # Once in a while, we save checkpoint, print statistics, and run evals.
-      if current_step % FLAGS.steps_per_checkpoint == 0:
-        num = (current_step/MAX_ITERATION_COUNT)*100
-        print()
-        print('LOSS : %.2f%%' % loss)
-        print()
-        print('PROGRESS: %.2f%%' % num)
-        print()
-        # Print statistics for the previous epoch.
-        perplexity = math.exp(loss) if loss < 300 else float('inf')
-        print ("global step %d learning rate %.4f step-time %.2f perplexity "
-               "%.2f" % (model.global_step.eval(), model.learning_rate.eval(),
-                         step_time, perplexity))
-        # Decrease learning rate if no improvement was seen over last 3 times.
-        if len(previous_losses) > 2 and loss > max(previous_losses[-3:]):
-          sess.run(model.learning_rate_decay_op)
-        previous_losses.append(loss)
-        # Save checkpoint and zero timer and loss.
-        if FLAGS.local is False:
-          tmp_model_checkpoint_path = os.path.join(FLAGS.tmp_model_folder, "model.ckpt-" + str(current_step))
-          # model_checkpoint_path = os.path.join(FLAGS.model_dir, "model.ckpt-" + str(current_step))
-          model_checkpoint_path = os.path.join(FLAGS.model_dir, "my-model")
-          tmp_checkpoint_path   = os.path.join(FLAGS.tmp_model_folder, "checkpoint")
-          # checkpoint_path = os.path.join("/hdfs/pnrsy/sys/jobs", os.environ['PHILLY_JOB_ID'], "models", "translate.ckpt")
-          checkpoint_path = os.path.join(FLAGS.model_dir, "checkpoint")
-
-          if not os.path.exists(FLAGS.model_dir):
-            os.makedirs(FLAGS.model_dir)
-            print("Created Folder !")
-          try:
-            # print(tmp_checkpoint_path)
-            # print(tmp_model_checkpoint_path)
-            print(model_checkpoint_path)
-            model.saver.save(sess, model_checkpoint_path, global_step=model.global_step)
-            print("Saved Model")
-            # model_checkpoint_list.append(model_checkpoint_path)
-          except Exception as e:
-           print("FAILED TO COPY FOR CHECKPOINT FOR FILE %s" % model_checkpoint_path)
-           try:
-             print(e.message)
-           except Exception as ee:
-             print("NO EXCEPTION MESSAGE")
-          if len(model_checkpoint_list) > 5:
-            os.remove(model_checkpoint_list[0])
-            model_checkpoint_list.pop(0)
-        else:
-          checkpoint_path = os.path.join(FLAGS.train_dir, "translate.ckpt")
-          # model.saver.save(sess, checkpoint_path, global_step=model.global_step)
+      encoder_inputs, encoder_input_len, decoder_inputs, decoder_targets, decoder_input_len, loss_weights = model.get_batch(train_set, bucket_id, _buckets, FLAGS.batch_size)
+      print(np.shape(encoder_inputs))
+      print(np.shape(encoder_input_len))
+      print(np.shape(decoder_inputs))
+      print(np.shape(decoder_targets))
+      print(np.shape(decoder_input_len))
+      print(np.shape(loss_weights))
 
 
 
+      print("batch done")
+      loss_track = []
+      
+      fd = model.make_input_data_feed_dict(encoder_inputs, encoder_input_len, decoder_inputs, decoder_targets, decoder_input_len, loss_weights, FLAGS.input_keep_prob, FLAGS.output_keep_prob, FLAGS.state_keep_prob)
+      # fd_inference = model.make_inference_inputs_II(encoder_inputs, encoder_input_len)
+      # run model 
+      l,d,e,f = sess.run([model.encoder_inputs_embedded, model.decoder_prediction_train, model.decoder_logits_train, model.decoder_outputs_train], fd)
+      print(np.shape(l))
+      print(np.shape(d))
+      print(np.shape(e))
+      print(np.shape(f))
+
+      # print(time.sleep(2))
+      break
+      # loss_track.append(l)
+      
+       
+      # # print extra info
+      # if current_step == 0 or current_step % batches_in_epoch == 0:
+      #     # print progress 
+      #     num = (current_step/MAX_ITERATION_COUNT)*100
+      #     print('Progress {}'.format(num))        
+      #     print('batch {}'.format(current_step))
+      #     # print('  minibatch loss: {}'.format(session.run(model.loss, fd)))
+      #     print(' minibatch loss: {}'.format(loss_track[-1]))
+      #     print("TODO: Rev Vocab for this part ! ")
+      #     # for i, (e_in, dt_pred) in enumerate(zip(
+      #     #         fd[model.encoder_inputs],
+      #     #         session.run(model.decoder_prediction_train, fd)
+      #     #     )):
+      #     #     print('  sample {}:'.format(i + 1))
+      #     #     print('    enc input           > {}'.format(e_in))
+      #     #     print('    dec train predicted > {}'.format(dt_pred))
+      #     #     if i >= 2:
+      #     #         break
+      #     # for i, (e_in, dt_pred) in enumerate(zip(
+      #     #         fd_inference[model.encoder_inputs],
+      #     #         session.run(model.decoder_prediction_inference, fd_inference)
+      #     #     )):
+      #     #     print('  sample {}:'.format(i + 1))
+      #     #     print('    enc input           > {}'.format(e_in))
+      #     #     print('    dec train predicted > {}'.format(dt_pred))
+      #     #     if i >= 2:
+      #     #         break
+
+      # step_time += (time.time() - start_time) / FLAGS.steps_per_checkpoint
+      # current_step += 1
+
+      # # Once in a while, we save checkpoint, print statistics, and run evals.
+      # if current_step % FLAGS.steps_per_checkpoint == 0:
+      #   if FLAGS.local is False:
+      #     tmp_model_checkpoint_path = os.path.join(FLAGS.tmp_model_folder, "model.ckpt-" + str(current_step))
+      #     # model_checkpoint_path = os.path.join(FLAGS.model_dir, "model.ckpt-" + str(current_step))
+      #     model_checkpoint_path = os.path.join(FLAGS.model_dir, "my-model")
+      #     tmp_checkpoint_path   = os.path.join(FLAGS.tmp_model_folder, "checkpoint")
+      #     # checkpoint_path = os.path.join("/hdfs/pnrsy/sys/jobs", os.environ['PHILLY_JOB_ID'], "models", "translate.ckpt")
+      #     checkpoint_path = os.path.join(FLAGS.model_dir, "checkpoint")
+
+      #     if not os.path.exists(FLAGS.model_dir):
+      #       os.makedirs(FLAGS.model_dir)
+      #       print("Created Folder !")
+      #     try:
+      #       # print(tmp_checkpoint_path)
+      #       # print(tmp_model_checkpoint_path)
+      #       print(model_checkpoint_path)
+      #       model.saver.save(sess, model_checkpoint_path, global_step=model.global_step)
+      #       print("Saved Model")
+      #       # model_checkpoint_list.append(model_checkpoint_path)
+      #     except Exception as e:
+      #      print("FAILED TO COPY FOR CHECKPOINT FOR FILE %s" % model_checkpoint_path)
+      #      try:
+      #        print(e.message)
+      #      except Exception as ee:
+      #        print("NO EXCEPTION MESSAGE")
+      #     if len(model_checkpoint_list) > 5:
+      #       os.remove(model_checkpoint_list[0])
+      #       model_checkpoint_list.pop(0)
+      #   else:
+      #     checkpoint_path = os.path.join(FLAGS.train_dir, "translate.ckpt")
+      #     # model.saver.save(sess, checkpoint_path, global_step=model.global_step)
+
+
+
+def decode():
+  print("Not Implemented")
+  print("Exiting Decoder")
 
 
 
@@ -249,53 +326,60 @@ def train():
 
 
 
+# with tf.Session() as session:
 
-with tf.Session() as session:
+#     # with bidirectional encoder, decoder state size should be
+#     # 2x encoder state size
+#     # model = Seq2SeqModel(encoder_cell=LSTMCell(10),
+#     #                      decoder_cell=LSTMCell(20), 
+#     #                      vocab_size=10,
+#     #                      embedding_size=10,
+#     #                      attention=True,
+#     #                      dropout=None,
+#     #                      bidirectional=True,
+#     #                      EOS_ID = 0,
+#     #                      PAD_ID = 1,
+#     #                      GO_ID  = 2,
+#     #                      num_layers=2)
 
-    # with bidirectional encoder, decoder state size should be
-    # 2x encoder state size
-    # model = Seq2SeqModel(encoder_cell=LSTMCell(10),
-    #                      decoder_cell=LSTMCell(20), 
-    #                      vocab_size=10,
-    #                      embedding_size=10,
-    #                      attention=True,
-    #                      dropout=None,
-    #                      bidirectional=True,
-    #                      EOS_ID = 0,
-    #                      PAD_ID = 1,
-    #                      GO_ID  = 2,
-    #                      num_layers=2)
-
-    model = Seq2SeqModel(encoder_cell_size = 10,
-                         decoder_cell_size = 20, 
-                         vocab_size=10,
-                         embedding_size=10,
-                         attention=True,
-                         dropout=None,
-                         bidirectional=True,
-                         EOS_ID = 0,
-                         PAD_ID = 1,
-                         GO_ID  = 2,
-                         num_layers=2)
+#     model = Seq2SeqModel(encoder_cell_size = 10,
+#                          decoder_cell_size = 20, 
+#                          vocab_size=10,
+#                          embedding_size=10,
+#                          attention=True,
+#                          dropout=None,
+#                          bidirectional=True,
+#                          EOS_ID = 0,
+#                          PAD_ID = 1,
+#                          GO_ID  = 2,
+#                          num_layers=2)
 
 
-    session.run(tf.global_variables_initializer())
-    names = [v.name for v in tf.trainable_variables()]
-    for name in names:
-      print(name)
+#     session.run(tf.global_variables_initializer())
+#     names = [v.name for v in tf.trainable_variables()]
+#     for name in names:
+#       print(name)
 
-    train(session, model,
-                       length_from=3, length_to=8,
-                       vocab_lower=2, vocab_upper=10,
-                       batch_size=10,
-                       max_batches=5000,
-                       batches_in_epoch=100,
-                       verbose=True,
-                       input_keep_prob=0.8,
-                       output_keep_prob=0.8,
-                       state_keep_prob=1)
+#     train(session, model,
+#                        length_from=3, length_to=8,
+#                        vocab_lower=2, vocab_upper=10,
+#                        batch_size=10,
+#                        max_batches=5000,
+#                        batches_in_epoch=100,
+#                        verbose=True,
+#                        input_keep_prob=0.8,
+#                        output_keep_prob=0.8,
+#                        state_keep_prob=1)
 
-    # a = helpers.random_sequences(length_from=3, length_to=8,vocab_lower=2, vocab_upper=10,batch_size =100)
-    # print(a)
-    # for i in a:
-    #   print(np.shape(a))
+#     # a = helpers.random_sequences(length_from=3, length_to=8,vocab_lower=2, vocab_upper=10,batch_size =100)
+#     # print(a)
+#     # for i in a:
+#     #   print(np.shape(a))
+def main(_):
+  if FLAGS.decode:
+    decode()
+  else:
+    train()
+
+if __name__ == "__main__":
+  tf.app.run()

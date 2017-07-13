@@ -1,4 +1,4 @@
-import math
+import math,random
 import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.seq2seq as seq2seq
@@ -55,7 +55,7 @@ class Seq2SeqModel():
         self._init_placeholders()
         self._init_cells()
 
-        self._init_decoder_train_connectors()
+        # self._init_decoder_train_connectors()
         self._init_embeddings()
 
         if self.bidirectional:
@@ -94,73 +94,87 @@ class Seq2SeqModel():
             dtype = tf.int32,
             name  = 'encoder_inputs',
         )
+        
         # A list of shape [batch_size]
         self.encoder_inputs_length = tf.placeholder(
             shape=(None,),
             dtype=tf.int32,
-            name='encoder_inputs_length',
-        )
-        # required for training, not required for testing
-        self.decoder_targets = tf.placeholder(
+            name='encoder_inputs_length',)
+        
+        self.decoder_train_inputs = tf.placeholder(
             shape = [None, None],
             dtype = tf.int32,
-            name  = 'decoder_targets'
-        )
+            name = 'decoder_train_inputs',)
 
-        # decoder length, A list of shape [batch_size]
-        self.decoder_targets_length = tf.placeholder(
-            shape=(None,),
-            dtype=tf.int32,
-            name='decoder_targets_length',
-        )
+        self.decoder_train_targets = tf.placeholder(
+            shape = [None, None],
+            dtype = tf.int32,
+            name = 'decoder_train_targets')
+
+        self.decoder_train_length = tf.placeholder(
+            shape = (None,),
+            dtype = tf.int32,
+            name  = 'decoder_train_length')
+
+        self.loss_weights = tf.placeholder(
+            shape = [None, None],
+            dtype = tf.float32,
+            name = 'loss_weights')
+
+        # # decoder length, A list of shape [batch_size]
+        # self.decoder_targets_length = tf.placeholder(
+        #     shape=(None,),
+        #     dtype=tf.int32,
+        #     name='decoder_targets_length',
+        # )
 
         self.input_keep_prob  = tf.placeholder(tf.float32, name="input_keep_prob")
         self.output_keep_prob = tf.placeholder(tf.float32, name="output_keep_prob")
         # self.state_keep_prob  = tf.placeholder(tf.float32, name="state_keep_prob")
 
 
-    def _init_decoder_train_connectors(self):
-        """
-        During training, `decoder_targets`
-        and decoder logits. This means that their shapes should be compatible.
-        Here we do a bit of plumbing to set this up.
+    # def _init_decoder_train_connectors(self):
+    #     """
+    #     During training, `decoder_targets`
+    #     and decoder logits. This means that their shapes should be compatible.
+    #     Here we do a bit of plumbing to set this up.
         
-        """
-        with tf.name_scope('DecoderTrainFeeds'):
-            # sequence_size, batch_size = tf.unstack(tf.shape(self.decoder_targets))
-            batch_size, sequence_size = tf.unstack(tf.shape(self.decoder_targets))
+    #     """
+    #     with tf.name_scope('DecoderTrainFeeds'):
+    #         # sequence_size, batch_size = tf.unstack(tf.shape(self.decoder_targets))
+    #         batch_size, sequence_size = tf.unstack(tf.shape(self.decoder_targets))
 
-            # 
-            # EOS_SLICE = tf.ones([1, batch_size], dtype=tf.int32) * self.EOS_ID
-            # PAD_SLICE = tf.ones([1, batch_size], dtype=tf.int32) * self.PAD_ID
-            EOS_SLICE = tf.ones([batch_size, 1], dtype=tf.int32) * self.EOS_ID
-            PAD_SLICE = tf.ones([batch_size, 1], dtype=tf.int32) * self.PAD_ID
-            GO_SLICE  = tf.ones([batch_size, 1], dtype=tf.int32) * self.GO_ID
+    #         # 
+    #         # EOS_SLICE = tf.ones([1, batch_size], dtype=tf.int32) * self.EOS_ID
+    #         # PAD_SLICE = tf.ones([1, batch_size], dtype=tf.int32) * self.PAD_ID
+    #         EOS_SLICE = tf.ones([batch_size, 1], dtype=tf.int32) * self.EOS_ID
+    #         PAD_SLICE = tf.ones([batch_size, 1], dtype=tf.int32) * self.PAD_ID
+    #         GO_SLICE  = tf.ones([batch_size, 1], dtype=tf.int32) * self.GO_ID
 
-            # self.decoder_train_inputs = tf.concat([EOS_SLICE, self.decoder_targets], axis=0)
-            # self.decoder_train_length = self.decoder_targets_length + 1
-            # self.decoder_train_inputs = tf.concat([self.decoder_targets, EOS_SLICE], axis=1)
+    #         # self.decoder_train_inputs = tf.concat([EOS_SLICE, self.decoder_targets], axis=0)
+    #         # self.decoder_train_length = self.decoder_targets_length + 1
+    #         # self.decoder_train_inputs = tf.concat([self.decoder_targets, EOS_SLICE], axis=1)
             
-            # decoder train input will have just a GO at the start
-            self.decoder_train_inputs  = tf.concat([GO_SLICE, self.decoder_targets]  , axis=1)
-            self.decoder_train_length  = self.decoder_targets_length + 1 #  1-GO
+    #         # decoder train input will have just a GO at the start
+    #         self.decoder_train_inputs  = tf.concat([GO_SLICE, self.decoder_targets]  , axis=1)
+    #         self.decoder_train_length  = self.decoder_targets_length + 1 #  1-GO
             
-            # decoder train target will have EOS at end
-            self.decoder_train_targets = tf.concat([self.decoder_targets, EOS_SLICE] , axis=1)
+    #         # decoder train target will have EOS at end
+    #         self.decoder_train_targets = tf.concat([self.decoder_targets, EOS_SLICE] , axis=1)
 
-            # decoder_train_targets = tf.concat([self.decoder_targets, PAD_SLICE], axis=0)
-            # decoder_train_targets_seq_len, _ = tf.unstack(tf.shape(decoder_train_targets))
-            # decoder_train_targets_eos_mask   = tf.one_hot(self.decoder_train_length - 1,
-            #                                             decoder_train_targets_seq_len,
-            #                                             on_value=self.EOS, off_value=self.PAD,
-            #                                             dtype=tf.int32)
-            # decoder_train_targets_eos_mask = tf.transpose(decoder_train_targets_eos_mask, [1, 0])
+    #         # decoder_train_targets = tf.concat([self.decoder_targets, PAD_SLICE], axis=0)
+    #         # decoder_train_targets_seq_len, _ = tf.unstack(tf.shape(decoder_train_targets))
+    #         # decoder_train_targets_eos_mask   = tf.one_hot(self.decoder_train_length - 1,
+    #         #                                             decoder_train_targets_seq_len,
+    #         #                                             on_value=self.EOS, off_value=self.PAD,
+    #         #                                             dtype=tf.int32)
+    #         # decoder_train_targets_eos_mask = tf.transpose(decoder_train_targets_eos_mask, [1, 0])
 
-            # hacky way using one_hot to put EOS symbol at the end of target sequence
-            # decoder_train_targets = tf.add(decoder_train_targets, decoder_train_targets_eos_mask)
-            # self.decoder_train_targets = decoder_train_targets
+    #         # hacky way using one_hot to put EOS symbol at the end of target sequence
+    #         # decoder_train_targets = tf.add(decoder_train_targets, decoder_train_targets_eos_mask)
+    #         # self.decoder_train_targets = decoder_train_targets
 
-            self.loss_weights = tf.ones([batch_size, tf.reduce_max(self.decoder_train_length)], dtype = tf.float32, name="loss_weights")
+    #         self.loss_weights = tf.ones([batch_size, tf.reduce_max(self.decoder_train_length)], dtype = tf.float32, name="loss_weights")
 
     def _init_embeddings(self):
         with tf.variable_scope("embedding") as scope:
@@ -330,7 +344,9 @@ class Seq2SeqModel():
         # logits  = tf.transpose(self.decoder_logits_train, [1, 0, 2])
         logits  = self.decoder_logits_train
         # targets = tf.transpose(self.decoder_train_targets, [1, 0])
+        print(logits)
         targets = self.decoder_train_targets
+        print(targets)
         self.loss     = seq2seq.sequence_loss(logits=logits, targets=targets, weights=self.loss_weights)
         self.train_op = tf.train.AdamOptimizer().minimize(self.loss)
 
@@ -356,6 +372,19 @@ class Seq2SeqModel():
             self.output_keep_prob : output_keep_prob
             # self.state_keep_prob  : state_keep_prob
         }
+    def make_input_data_feed_dict(self, encoder_inputs, encoder_input_len,  decoder_inputs, decoder_targets, decoder_input_len, loss_weights, input_keep_prob, output_keep_prob, state_keep_prob):
+        print(np.shape(decoder_targets))
+        return{
+            self.encoder_inputs : encoder_inputs,
+            self.encoder_inputs_length :  encoder_input_len,
+            self.decoder_train_inputs :  decoder_inputs,
+            self.decoder_train_targets : decoder_targets,
+            self.decoder_train_length : decoder_input_len,
+            self.loss_weights : loss_weights,
+            self.input_keep_prob : input_keep_prob,
+            self.output_keep_prob : output_keep_prob
+        }
+
 
     def make_inference_inputs(self, input_seq):
         inputs_, inputs_length_ = helpers.batch_II(input_seq)
@@ -363,83 +392,93 @@ class Seq2SeqModel():
             self.encoder_inputs: inputs_,
             self.encoder_inputs_length: inputs_length_,
         }
+    def make_inference_inputs_II(self, input_seq, input_seq_len):
+        # inputs_, inputs_length_ = helpers.batch_II(input_seq)
+        return {
+            self.encoder_inputs: input_seq,
+            self.encoder_inputs_length: input_seq_len,
+        }
 
-def get_batch(self, data, bucket_id, buckets, batch_size):
-    """Get a random batch of data from the specified bucket, prepare for step.
+    def get_batch(self, data, bucket_id, buckets, batch_size):
+        """Get a random batch of data from the specified bucket, prepare for step.
 
-    To feed data in step(..) it must be a list of batch-major vectors, while
-    data here contains single length-major cases. So the main logic of this
-    function is to re-index data cases to be in the proper format for feeding.
+        To feed data in step(..) it must be a list of batch-major vectors, while
+        data here contains single length-major cases. So the main logic of this
+        function is to re-index data cases to be in the proper format for feeding.
 
-    Args:
-      data: a tuple of size len(self.buckets) in which each element contains
-        lists of pairs of input and output data that we use to create a batch.
-      bucket_id: integer, which bucket to get the batch for.
+        Args:
+          data: a tuple of size len(self.buckets) in which each element contains
+            lists of pairs of input and output data that we use to create a batch.
+          bucket_id: integer, which bucket to get the batch for.
 
-    Returns:
-      The triple (encoder_inputs, decoder_inputs, target_weights) for
-      the constructed batch that has the proper format to call step(...) later.
-    """
-    encoder_size, decoder_size = buckets[bucket_id]
-    encoder_inputs, decoder_inputs = [], []
+        Returns:
+          The triple (encoder_inputs, decoder_inputs, target_weights) for
+          the constructed batch that has the proper format to call step(...) later.
+        """
+        encoder_size, decoder_size = buckets[bucket_id]
+        encoder_inputs, decoder_inputs, decoder_targets = [], [], []
 
-    # Get a random batch of encoder and decoder inputs from data,
-    # pad them if needed, reverse encoder inputs and add GO to decoder.
-    real_encoder_input_len = []
-    real_decoder_input_len = []
+        # Get a random batch of encoder and decoder inputs from data,
+        # pad them if needed, reverse encoder inputs and add GO to decoder.
+        real_encoder_input_len = []
+        real_decoder_input_len = []
 
-    for _ in xrange(batch_size):
-      encoder_input, decoder_input = random.choice(data[bucket_id])
-      real_encoder_input_len.append(len(encoder_input))
+        for _ in range(batch_size):
+          # print(bucket_id)
+          # print(np.shape(data[bucket_id]))
+          encoder_input, decoder_input = random.choice(data[bucket_id])
+          real_encoder_input_len.append(len(encoder_input))
 
-      # Encoder inputs are padded and then reversed.
-      encoder_pad = [self.PAD_ID] * (encoder_size - len(encoder_input))
-      # TO-DO : Should consider reversing or not, since bidirectional mein does it matter
-      encoder_inputs.append(list(reversed(encoder_input + encoder_pad)))
+          # Encoder inputs are padded and then reversed.
+          encoder_pad = [self.PAD_ID] * (encoder_size - len(encoder_input))
+          # TO-DO : Should consider reversing or not, since bidirectional mein does it matter
+          encoder_inputs.append(list(reversed(encoder_input + encoder_pad)))
 
-      # Decoder inputs get an extra "GO" symbol, and are padded then.
-      real_decoder_input_len.append(len(decoder_input)) # EOS is already added in generate_question/read_data
-      decoder_pad_size = decoder_size - len(decoder_input) - 1
-      decoder_inputs.append([self.GO_ID] + decoder_input +
-                            [self.PAD_ID] * decoder_pad_size)
+          # Decoder inputs get an extra "GO" symbol, and are padded then.
+          real_decoder_input_len.append(len(decoder_input) + 1) # Adding 1 to consider for GO and EOS
+          decoder_pad_size = decoder_size - len(decoder_input) - 1
+          
+          decoder_inputs.append([self.GO_ID] + decoder_input + [self.PAD_ID] * decoder_pad_size)
+          decoder_targets.append(decoder_input +[self.EOS_ID] + [self.PAD_ID]* decoder_pad_size)
 
-    batch_weights = np.ones([batch_size, decoder_size])
-    
-    for batch_idx in batch_size:
-        for len_idx in decoder_size:
-            if len_idx == decoder_size-1:
-                batch_weights[batch_idx, len_idx] = 0
-            else:
-                if decoder_inputs[batch_idx][len_idx + 1] == self.PAD_ID:
+
+        batch_weights = np.ones([batch_size, decoder_size])
+        
+        for batch_idx in range(batch_size):
+            for len_idx in range(decoder_size):
+                if len_idx == decoder_size-1:
                     batch_weights[batch_idx, len_idx] = 0
+                else:
+                    if decoder_inputs[batch_idx][len_idx + 1] == self.PAD_ID:
+                        batch_weights[batch_idx, len_idx] = 0
 
-    # # Now we create batch-major vectors from the data selected above.
-    # batch_encoder_inputs, batch_decoder_inputs, batch_weights = [], [], []
+        # # Now we create batch-major vectors from the data selected above.
+        # batch_encoder_inputs, batch_decoder_inputs, batch_weights = [], [], []
 
-    # # Batch encoder inputs are just re-indexed encoder_inputs.
-    # for length_idx in xrange(encoder_size):
-    #   batch_encoder_inputs.append(
-    #       np.array([encoder_inputs[batch_idx][length_idx]
-    #                 for batch_idx in xrange(batch_size)], dtype=np.int32))
+        # # Batch encoder inputs are just re-indexed encoder_inputs.
+        # for length_idx in xrange(encoder_size):
+        #   batch_encoder_inputs.append(
+        #       np.array([encoder_inputs[batch_idx][length_idx]
+        #                 for batch_idx in xrange(batch_size)], dtype=np.int32))
 
-    # # Batch decoder inputs are re-indexed decoder_inputs, we create weights.
-    # for length_idx in xrange(decoder_size):
-    #   batch_decoder_inputs.append(
-    #       np.array([decoder_inputs[batch_idx][length_idx]
-    #                 for batch_idx in xrange(batch_size)], dtype=np.int32))
+        # # Batch decoder inputs are re-indexed decoder_inputs, we create weights.
+        # for length_idx in xrange(decoder_size):
+        #   batch_decoder_inputs.append(
+        #       np.array([decoder_inputs[batch_idx][length_idx]
+        #                 for batch_idx in xrange(batch_size)], dtype=np.int32))
 
-    #   # Create target_weights to be 0 for targets that are padding.
-    #   batch_weight = np.ones(batch_size, dtype=np.float32)
-    #   for batch_idx in xrange(batch_size):
-    #     # We set weight to 0 if the corresponding target is a PAD symbol.
-    #     # The corresponding target is decoder_input shifted by 1 forward.
-    #     if length_idx < decoder_size - 1:
-    #       target = decoder_inputs[batch_idx][length_idx + 1]
-    #     if length_idx == decoder_size - 1 or target == data_utils.PAD_ID:
-    #       batch_weight[batch_idx] = 0.0
-    #   batch_weights.append(batch_weight)
-    # return batch_encoder_inputs, batch_decoder_inputs, batch_weights
-    return encoder_inputs, decoder_inputs, batch_weights
+        #   # Create target_weights to be 0 for targets that are padding.
+        #   batch_weight = np.ones(batch_size, dtype=np.float32)
+        #   for batch_idx in xrange(batch_size):
+        #     # We set weight to 0 if the corresponding target is a PAD symbol.
+        #     # The corresponding target is decoder_input shifted by 1 forward.
+        #     if length_idx < decoder_size - 1:
+        #       target = decoder_inputs[batch_idx][length_idx + 1]
+        #     if length_idx == decoder_size - 1 or target == data_utils.PAD_ID:
+        #       batch_weight[batch_idx] = 0.0
+        #   batch_weights.append(batch_weight)
+        # return batch_encoder_inputs, batch_decoder_inputs, batch_weights
+        return encoder_inputs, real_encoder_input_len,  decoder_inputs, decoder_targets, real_decoder_input_len, batch_weights
 
 
 def make_seq2seq_model(**kwargs):
@@ -454,54 +493,54 @@ def make_seq2seq_model(**kwargs):
     return Seq2SeqModel(**args)
 
 
-def train(session, model,
-                length_from=3, length_to=8,
-                vocab_lower=2, vocab_upper=10,
-                batch_size=100,
-                max_batches=5000,
-                batches_in_epoch=1000,
-                verbose=True,
-                input_keep_prob=1,
-                output_keep_prob=1,
-                state_keep_prob=1):
+# def train(session, model,
+#                 length_from=3, length_to=8,
+#                 vocab_lower=2, vocab_upper=10,
+#                 batch_size=100,
+#                 max_batches=5000,
+#                 batches_in_epoch=1000,
+#                 verbose=True,
+#                 input_keep_prob=1,
+#                 output_keep_prob=1,
+#                 state_keep_prob=1):
     
-    print(input_keep_prob)
-    batches = helpers.random_sequences(length_from=length_from, length_to=length_to,
-                                       vocab_lower=vocab_lower, vocab_upper=vocab_upper,
-                                       batch_size=batch_size)
-    loss_track = []
-    try:
-        for batch in range(max_batches+1):
-            batch_data = next(batches)
-            fd = model.make_train_inputs_II(batch_data, batch_data, input_keep_prob, output_keep_prob, state_keep_prob)
-            fd_inference = model.make_inference_inputs(batch_data)
-            _, l = session.run([model.train_op, model.loss], fd)
-            loss_track.append(l)
+#     print(input_keep_prob)
+#     batches = helpers.random_sequences(length_from=length_from, length_to=length_to,
+#                                        vocab_lower=vocab_lower, vocab_upper=vocab_upper,
+#                                        batch_size=batch_size)
+#     loss_track = []
+#     try:
+#         for batch in range(max_batches+1):
+#             batch_data = next(batches)
+#             fd = model.make_train_inputs_II(batch_data, batch_data, input_keep_prob, output_keep_prob, state_keep_prob)
+#             fd_inference = model.make_inference_inputs(batch_data)
+#             _, l = session.run([model.train_op, model.loss], fd)
+#             loss_track.append(l)
 
-            if verbose:
-                if batch == 0 or batch % batches_in_epoch == 0:
-                    print('batch {}'.format(batch))
-                    print('  minibatch loss: {}'.format(session.run(model.loss, fd)))
-                    for i, (e_in, dt_pred) in enumerate(zip(
-                            fd[model.encoder_inputs],
-                            session.run(model.decoder_prediction_train, fd)
-                        )):
-                        print('  sample {}:'.format(i + 1))
-                        print('    enc input           > {}'.format(e_in))
-                        print('    dec train predicted > {}'.format(dt_pred))
-                        if i >= 2:
-                            break
-                    for i, (e_in, dt_pred) in enumerate(zip(
-                            fd_inference[model.encoder_inputs],
-                            session.run(model.decoder_prediction_inference, fd_inference)
-                        )):
-                        print('  sample {}:'.format(i + 1))
-                        print('    enc input           > {}'.format(e_in))
-                        print('    dec train predicted > {}'.format(dt_pred))
-                        if i >= 2:
-                            break
-                    print()
-    except KeyboardInterrupt:
-        print('training interrupted')
+#             if verbose:
+#                 if batch == 0 or batch % batches_in_epoch == 0:
+#                     print('batch {}'.format(batch))
+#                     print('  minibatch loss: {}'.format(session.run(model.loss, fd)))
+#                     for i, (e_in, dt_pred) in enumerate(zip(
+#                             fd[model.encoder_inputs],
+#                             session.run(model.decoder_prediction_train, fd)
+#                         )):
+#                         print('  sample {}:'.format(i + 1))
+#                         print('    enc input           > {}'.format(e_in))
+#                         print('    dec train predicted > {}'.format(dt_pred))
+#                         if i >= 2:
+#                             break
+#                     for i, (e_in, dt_pred) in enumerate(zip(
+#                             fd_inference[model.encoder_inputs],
+#                             session.run(model.decoder_prediction_inference, fd_inference)
+#                         )):
+#                         print('  sample {}:'.format(i + 1))
+#                         print('    enc input           > {}'.format(e_in))
+#                         print('    dec train predicted > {}'.format(dt_pred))
+#                         if i >= 2:
+#                             break
+#                     print()
+#     except KeyboardInterrupt:
+#         print('training interrupted')
 
-    return loss_track
+#     return loss_track
