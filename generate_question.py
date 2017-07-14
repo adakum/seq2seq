@@ -6,19 +6,20 @@ from seq2seq_model import Seq2SeqModel#, train
 import pandas as pd
 import helpers
 import data_utils 
+
 tf.reset_default_graph()
 tf.set_random_seed(1)
 
 tf.app.flags.DEFINE_float("learning_rate", 2, "Learning rate.")
 tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.95,"Learning rate decays by this much.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 5.0, "Clip gradients to this norm.")
-tf.app.flags.DEFINE_integer("batch_size", 20,"Batch size to use during training.")
-tf.app.flags.DEFINE_integer("size", 10, "Size of each model layer.")
+tf.app.flags.DEFINE_integer("batch_size", 128,"Batch size to use during training.")
+tf.app.flags.DEFINE_integer("size", 512, "Size of each model layer.")
 tf.app.flags.DEFINE_integer("num_layers", 2, "Number of layers in the model.")
-tf.app.flags.DEFINE_integer("en_vocab_size", 10, "English vocabulary size.")
-tf.app.flags.DEFINE_integer("fr_vocab_size", 10, "French vocabulary size.")
+tf.app.flags.DEFINE_integer("en_vocab_size", 150000, "English vocabulary size.")
+tf.app.flags.DEFINE_integer("fr_vocab_size", 150000, "French vocabulary size.")
 tf.app.flags.DEFINE_integer("num_samples", 512, "Num samples for sampled softmax.")
-tf.app.flags.DEFINE_integer("embedding_size", 10, "Num samples for sampled softmax.")
+tf.app.flags.DEFINE_integer("embedding_size", 300, "Num samples for sampled softmax.")
 
 tf.app.flags.DEFINE_integer("dropout",None,"use dropout or not")
 tf.app.flags.DEFINE_integer("input_keep_prob",  1,"use dropout or not")
@@ -49,11 +50,10 @@ tf.app.flags.DEFINE_string("data_dir", "./TrainingData", "Data directory")
 tf.app.flags.DEFINE_string("train_dir", "./models", "Training directory.") # this is not actually used
 # tf.app.flags.DEFINE_string("second_data_dir", sys.argv[1], 'Training directory.')
 FLAGS = tf.app.flags.FLAGS
-_buckets = [(3, 7), (5, 12), (7, 17), (9, 20)]
+# _buckets = [(3, 7), (5, 12), (7, 17), (9, 20)]
+_buckets = [(10,15)]
 
 print("TF Version : %s", tf.__version__)
-
-
 print(".....................Printing Parameters.........................")
 print("sys.version : " + sys.version)
 print("learning_rate = %f" %  FLAGS.learning_rate)
@@ -144,8 +144,8 @@ def create_model(session):
   #     num_samples = FLAGS.num_samples, forward_only=forward_only, bidirectional=True, lstm_type=FLAGS.lstm_type)
 
   # print the trainable variables
-  for v in tf.trainable_variables():
-    print(v.name)
+  # for v in tf.trainable_variables():
+  #   print(v.name)
 
   ckpt = tf.train.get_checkpoint_state(FLAGS.model_dir)
   print(ckpt)
@@ -213,27 +213,38 @@ def train():
       start_time = time.time()
 
       encoder_inputs, encoder_input_len, decoder_inputs, decoder_targets, decoder_input_len, loss_weights = model.get_batch(train_set, bucket_id, _buckets, FLAGS.batch_size)
-      print(np.shape(encoder_inputs))
-      print(np.shape(encoder_input_len))
-      print(np.shape(decoder_inputs))
-      print(np.shape(decoder_targets))
-      print(np.shape(decoder_input_len))
-      print(np.shape(loss_weights))
+      
+      print("encoder_inputs :{}".format(np.shape(encoder_inputs)))
+      print("encoder_input_len :{}".format(np.shape(encoder_input_len)))
+      
+      print("decoder_inputs :{}".format(np.shape(decoder_inputs)))
+      print("decoder_targets :{}".format(np.shape(decoder_targets)))
+      print("decoder_input_len :{}".format(np.shape(decoder_input_len)))
+      # for x in decoder_input_len:
+        # print(x)
+      print(decoder_input_len)
+      print("loss_weights :{}".format(np.shape(loss_weights)))
+      print("*****************************")
 
-
-
-      print("batch done")
       loss_track = []
       
       fd = model.make_input_data_feed_dict(encoder_inputs, encoder_input_len, decoder_inputs, decoder_targets, decoder_input_len, loss_weights, FLAGS.input_keep_prob, FLAGS.output_keep_prob, FLAGS.state_keep_prob)
       # fd_inference = model.make_inference_inputs_II(encoder_inputs, encoder_input_len)
       # run model 
-      l,d = sess.run([model.decoder_logits_train, model.decoder_train_targets], fd)
-      # print(l)
-      print(np.shape(l))
-      print(np.shape(d))
+      f,e,l,d,a,b,p = sess.run([model.encoder_inputs_length, model.encoder_outputs,model.decoder_logits_train, model.decoder_train_targets,  model.decoder_train_length, model.decoder_train_inputs, model.decoder_train_inputs_embedded], fd)
+      print("max len encoder : {}".format(max(f)))
+      print("encoder_outputs : {}".format(np.shape(e)))
+      print("decoder_train_length : {}".format(max(a)))
+      print("decoder_train_inputs_embedded : {}".format(np.shape(p)))
+      # print(a)
+      print("decoder_logits_train : {}".format(np.shape(l)))
+      print("decoder_train_targets : {}".format(np.shape(d)))
+      print("decoder_train_inputs : {}".format(np.shape(b)))
+      for x in b:
+        print(x)
+      
       # print(np.shape(f))
-      m = sess.run([model.loss], fd)
+      # m = sess.run([model.loss], fd)
 
       break
       loss_track.append(l)

@@ -42,8 +42,10 @@ class Seq2SeqModel():
     
         self.EOS_ID  = EOS_ID
         self.PAD_ID  = PAD_ID
-        self.GO_ID  = GO_ID
-        
+        self.GO_ID   = GO_ID
+        print("EOS_ID :{}".format(self.EOS_ID))  
+        print("PAD_ID :{}".format(self.PAD_ID))
+        print(" GO_ID :{}".format(self.GO_ID))        
         self._make_graph()
 
     @property
@@ -269,10 +271,10 @@ class Seq2SeqModel():
                     num_decoder_symbols=self.vocab_size,
                 )
             else:
-
                 # attention_states: size [batch_size, max_time, num_units]
                 # [adkuma] Already in that format
                 # attention_states = tf.transpose(self.encoder_outputs, [1, 0, 2])
+                
                 attention_states = self.encoder_outputs 
                 print("decoder hidden ")
                 print(self.decoder_hidden_units)
@@ -304,7 +306,7 @@ class Seq2SeqModel():
                     embeddings=self.embedding_matrix,
                     start_of_sequence_id=self.GO_ID,
                     end_of_sequence_id=self.EOS_ID,
-                    maximum_length=tf.reduce_max(self.encoder_inputs_length) + 3,
+                    maximum_length=tf.reduce_max(self.encoder_inputs_length) + 2,
                     num_decoder_symbols=self.vocab_size,
                 )
 
@@ -430,12 +432,13 @@ class Seq2SeqModel():
           encoder_inputs.append(list(reversed(encoder_input + encoder_pad)))
 
           # Decoder inputs get an extra "GO" symbol, and are padded then.
-          real_decoder_input_len.append(len(decoder_input) + 1) # Adding 1 to consider for GO and EOS
+          # real_decoder_input_len.append(len(decoder_input) + 1) # Adding 1 to consider for GO and EOS
+          real_decoder_input_len.append(15) # Adding 1 to consider for GO and EOS
+          
           decoder_pad_size = decoder_size - len(decoder_input) - 1
           
-          decoder_inputs.append([self.GO_ID] + decoder_input + [self.PAD_ID] * decoder_pad_size)
-          decoder_targets.append(decoder_input +[self.EOS_ID] + [self.PAD_ID]* decoder_pad_size)
-
+          decoder_inputs.append([self.GO_ID] + decoder_input + ([self.PAD_ID] * decoder_pad_size))
+          decoder_targets.append(decoder_input +[self.EOS_ID] + ([self.PAD_ID]* decoder_pad_size))
 
         batch_weights = np.ones([batch_size, decoder_size])
         
