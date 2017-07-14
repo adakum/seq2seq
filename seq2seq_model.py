@@ -413,42 +413,77 @@ class Seq2SeqModel():
           the constructed batch that has the proper format to call step(...) later.
         """
         encoder_size, decoder_size = buckets[bucket_id]
-        encoder_inputs, decoder_inputs, decoder_targets = [], [], []
+        # encoder_inputs, decoder_inputs, decoder_targets = [], [], []
 
         # Get a random batch of encoder and decoder inputs from data,
         # pad them if needed, reverse encoder inputs and add GO to decoder.
         real_encoder_input_len = []
         real_decoder_input_len = []
 
-        for _ in range(batch_size):
-          # print(bucket_id)
-          # print(np.shape(data[bucket_id]))
-          encoder_input, decoder_input = random.choice(data[bucket_id])
-          real_encoder_input_len.append(len(encoder_input))
+        total_data_len = len(data[bucket_id])
 
-          # Encoder inputs are padded and then reversed.
-          encoder_pad = [self.PAD_ID] * (encoder_size - len(encoder_input))
-          # TO-DO : Should consider reversing or not, since bidirectional mein does it matter
-          encoder_inputs.append(list(reversed(encoder_input + encoder_pad)))
+        random_idx = random.sample(range(total_data_len), batch_size)
+        # batch_data = data[random_idx]
+        batch_data = [data[bucket_id][x] for x in random_idx]
 
-          # Decoder inputs get an extra "GO" symbol, and are padded then.
-          # real_decoder_input_len.append(len(decoder_input) + 1) # Adding 1 to consider for GO and EOS
-          real_decoder_input_len.append(15) # Adding 1 to consider for GO and EOS
-          
-          decoder_pad_size = decoder_size - len(decoder_input) - 1
-          
-          decoder_inputs.append([self.GO_ID] + decoder_input + ([self.PAD_ID] * decoder_pad_size))
-          decoder_targets.append(decoder_input +[self.EOS_ID] + ([self.PAD_ID]* decoder_pad_size))
+        input_seq = [x[0] for x in batch_data]
+        output_seq = [x[1] for x in batch_data]
 
-        batch_weights = np.ones([batch_size, decoder_size])
+        encoder_inputs_len = [len(x) for x in input_seq]
+        decoder_inputs_len = [len(x) + 1 for x in output_seq] # added 1 to consider for GO_ID and EOS_ID(in target) 
+
+        max_encoder_inputs_len = max(encoder_inputs_len) 
+        max_decoder_inputs_len = max(decoder_inputs_len) 
+
+        # encoder input
+        padded_encoder_inputs = [x + [self.PAD_ID]*(max_encoder_inputs_len - len(x)) for x in input_seq]
         
+        # decoder input and target
+        padded_decoder_inputs  = [[self.GO_ID] + x + [self.PAD_ID]*(max_decoder_inputs_len - len(x) -1) for x in output_seq]
+        padded_decoder_targets = [x + [self.EOS_ID] + [self.PAD_ID]*(max_decoder_inputs_len - len(x) -1) for x in output_seq]
+
+        batch_weights = np.ones([batch_size, max_decoder_inputs_len])
+
         for batch_idx in range(batch_size):
-            for len_idx in range(decoder_size):
-                if len_idx == decoder_size-1:
+            for len_idx in range(max_decoder_inputs_len):
+                # encoder input's format is GO_ID, word_1, word_2, .... , word_n, PAD, PAD, PAD
+                # EOS_ID is not in encoder_input
+                # batch_wieght =0 for index where value is PAD
+                if padded_decoder_inputs[batch_idx][len_idx] == self.PAD_ID:
                     batch_weights[batch_idx, len_idx] = 0
-                else:
-                    if decoder_inputs[batch_idx][len_idx + 1] == self.PAD_ID:
-                        batch_weights[batch_idx, len_idx] = 0
+
+        # for _ in range(batch_size):
+        #   # print(bucket_id)
+        #   # print(np.shape(data[bucket_id]))
+        #   encoder_input, decoder_input = random.choice(data[bucket_id])
+        #   real_encoder_input_len.append(len(encoder_input))
+
+        #   # Encoder inputs are padded and then reversed.
+        #   encoder_pad = [self.PAD_ID] * (encoder_size - len(encoder_input))
+        #   # TO-DO : Should consider reversing or not, since bidirectional mein does it matter
+        #   encoder_inputs.append(list(reversed(encoder_input + encoder_pad)))
+
+        #   # Decoder inputs get an extra "GO" symbol, and are padded then.
+        #   # real_decoder_input_len.append(len(decoder_input) + 1) # Adding 1 to consider for GO and EOS
+        #   real_decoder_input_len.append(len(decoder_input) + 1) # Adding 1 to consider for GO and EOS
+          
+        #   decoder_pad_size = decoder_size - len(decoder_input) - 1
+          
+        #   decoder_inputs.append([self.GO_ID] + decoder_input + ([self.PAD_ID] * decoder_pad_size))
+        #   # decoder_targets.append(decoder_input +[self.EOS_ID] + ([self.PAD_ID]* decoder_pad_size))
+        
+        # max_decoder_len_present_batch = max(real_decoder_input_len)
+        # batch_weights = np.ones([batch_size, max(real_decoder_input_len)])
+        
+        # for batch_idx in range(batch_size):
+        #     for len_idx in range(max_decoder_len_present_batch):
+        #         print(len_idx)
+        #         if len_idx == (max_decoder_len_present_batch-1):
+        #             if decoder_inputs[batch_idx][len_idx + 1] == self.PAD_ID:
+        #                 batch_weights[batch_idx, len_idx] = 0
+        #         else:
+        #             if decoder_inputs[batch_idx][len_idx + 1] == self.PAD_ID:
+        #                 batch_weights[batch_idx, len_idx] = 0
 
         # # Now we create batch-major vectors from the data selected above.
         # batch_encoder_inputs, batch_decoder_inputs, batch_weights = [], [], []
@@ -476,7 +511,8 @@ class Seq2SeqModel():
         #       batch_weight[batch_idx] = 0.0
         #   batch_weights.append(batch_weight)
         # return batch_encoder_inputs, batch_decoder_inputs, batch_weights
-        return encoder_inputs, real_encoder_input_len,  decoder_inputs, decoder_targets, real_decoder_input_len, batch_weights
+        
+        return padded_encoder_inputs, encoder_inputs_len,  padded_decoder_inputs, padded_decoder_targets, decoder_inputs_len, batch_weights
 
 
 def make_seq2seq_model(**kwargs):

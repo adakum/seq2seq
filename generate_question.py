@@ -50,8 +50,8 @@ tf.app.flags.DEFINE_string("data_dir", "./TrainingData", "Data directory")
 tf.app.flags.DEFINE_string("train_dir", "./models", "Training directory.") # this is not actually used
 # tf.app.flags.DEFINE_string("second_data_dir", sys.argv[1], 'Training directory.')
 FLAGS = tf.app.flags.FLAGS
-# _buckets = [(3, 7), (5, 12), (7, 17), (9, 20)]
-_buckets = [(10,15)]
+_buckets = [(3, 7), (5, 12), (7, 17), (9, 20)]
+# _buckets = [(10,15)]
 
 print("TF Version : %s", tf.__version__)
 print(".....................Printing Parameters.........................")
@@ -204,7 +204,7 @@ def train():
       # Choose a bucket according to data distribution. We pick a random number
       # in [0, 1] and use the corresponding interval in train_buckets_scale.
       
-      # print(current_step)
+      print("Current Step > {}".format(current_step))
       random_number_01 = np.random.random_sample()
       bucket_id = min([i for i in range(len(train_buckets_scale))
                        if train_buckets_scale[i] > random_number_01])
@@ -214,72 +214,30 @@ def train():
 
       encoder_inputs, encoder_input_len, decoder_inputs, decoder_targets, decoder_input_len, loss_weights = model.get_batch(train_set, bucket_id, _buckets, FLAGS.batch_size)
       
-      print("encoder_inputs :{}".format(np.shape(encoder_inputs)))
-      print("encoder_input_len :{}".format(np.shape(encoder_input_len)))
-      
-      print("decoder_inputs :{}".format(np.shape(decoder_inputs)))
-      print("decoder_targets :{}".format(np.shape(decoder_targets)))
-      print("decoder_input_len :{}".format(np.shape(decoder_input_len)))
-      # for x in decoder_input_len:
-        # print(x)
-      print(decoder_input_len)
-      print("loss_weights :{}".format(np.shape(loss_weights)))
-      print("*****************************")
-
       loss_track = []
       
       fd = model.make_input_data_feed_dict(encoder_inputs, encoder_input_len, decoder_inputs, decoder_targets, decoder_input_len, loss_weights, FLAGS.input_keep_prob, FLAGS.output_keep_prob, FLAGS.state_keep_prob)
       # fd_inference = model.make_inference_inputs_II(encoder_inputs, encoder_input_len)
       # run model 
-      f,e,l,d,a,b,p = sess.run([model.encoder_inputs_length, model.encoder_outputs,model.decoder_logits_train, model.decoder_train_targets,  model.decoder_train_length, model.decoder_train_inputs, model.decoder_train_inputs_embedded], fd)
-      print("max len encoder : {}".format(max(f)))
-      print("encoder_outputs : {}".format(np.shape(e)))
-      print("decoder_train_length : {}".format(max(a)))
-      print("decoder_train_inputs_embedded : {}".format(np.shape(p)))
-      # print(a)
-      print("decoder_logits_train : {}".format(np.shape(l)))
-      print("decoder_train_targets : {}".format(np.shape(d)))
-      print("decoder_train_inputs : {}".format(np.shape(b)))
-      for x in b:
-        print(x)
-      
-      # print(np.shape(f))
-      # m = sess.run([model.loss], fd)
-
-      break
-      loss_track.append(l)
-      
+      _ , loss = sess.run([model.train_op, model.loss], fd)
+      # break
+      print("Loss > {}".format(loss))
+      loss_track.append(loss)
        
-      # # print extra info
-      # if current_step == 0 or current_step % batches_in_epoch == 0:
-      #     # print progress 
-      #     num = (current_step/MAX_ITERATION_COUNT)*100
-      #     print('Progress {}'.format(num))        
-      #     print('batch {}'.format(current_step))
-      #     # print('  minibatch loss: {}'.format(session.run(model.loss, fd)))
-      #     print(' minibatch loss: {}'.format(loss_track[-1]))
-      #     print("TODO: Rev Vocab for this part ! ")
-      #     # for i, (e_in, dt_pred) in enumerate(zip(
-      #     #         fd[model.encoder_inputs],
-      #     #         session.run(model.decoder_prediction_train, fd)
-      #     #     )):
-      #     #     print('  sample {}:'.format(i + 1))
-      #     #     print('    enc input           > {}'.format(e_in))
-      #     #     print('    dec train predicted > {}'.format(dt_pred))
-      #     #     if i >= 2:
-      #     #         break
-      #     # for i, (e_in, dt_pred) in enumerate(zip(
-      #     #         fd_inference[model.encoder_inputs],
-      #     #         session.run(model.decoder_prediction_inference, fd_inference)
-      #     #     )):
-      #     #     print('  sample {}:'.format(i + 1))
-      #     #     print('    enc input           > {}'.format(e_in))
-      #     #     print('    dec train predicted > {}'.format(dt_pred))
-      #     #     if i >= 2:
-      #     #         break
+      for i, (e_in, dt_pred) in enumerate(zip(
+              fd[model.encoder_inputs],
+              sess.run(model.decoder_prediction_train, fd)
+          )):
+          print('  sample {}:'.format(i + 1))
+          print('    enc input           > {}'.format(e_in))
+          print('    dec train predicted > {}'.format(dt_pred))
+          print('    dec train actual > {}'.format(fd[model.decoder_train_targets][i]))
+
+          if i >= 2:
+              break
 
       # step_time += (time.time() - start_time) / FLAGS.steps_per_checkpoint
-      # current_step += 1
+      current_step += 1
 
       # # Once in a while, we save checkpoint, print statistics, and run evals.
       # if current_step % FLAGS.steps_per_checkpoint == 0:
