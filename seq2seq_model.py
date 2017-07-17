@@ -195,15 +195,21 @@ class Seq2SeqModel():
             sqrt3 = math.sqrt(3)
             initializer = tf.random_uniform_initializer(-sqrt3, sqrt3)
 
-            self.embedding_matrix = tf.get_variable(
-                name = "embedding_matrix",
+            self.encoder_embedding_matrix = tf.get_variable(
+                name = "encoder_embedding_matrix",
                 shape=[self.vocab_size, self.embedding_size],
                 initializer=initializer,
                 dtype=tf.float32)
 
-            self.encoder_inputs_embedded = tf.nn.embedding_lookup(self.embedding_matrix, self.encoder_inputs)
+            self.decoder_embedding_matrix = tf.get_variable(
+                name = "decoder_embedding_matrix",
+                shape=[self.vocab_size, self.embedding_size],
+                initializer=initializer,
+                dtype=tf.float32)
 
-            self.decoder_train_inputs_embedded = tf.nn.embedding_lookup(self.embedding_matrix, self.decoder_train_inputs)
+            self.encoder_inputs_embedded = tf.nn.embedding_lookup(self.encoder_embedding_matrix, self.encoder_inputs)
+
+            self.decoder_train_inputs_embedded = tf.nn.embedding_lookup(self.decoder_embedding_matrix, self.decoder_train_inputs)
 
     def _init_simple_encoder(self):
         with tf.variable_scope("Encoder") as scope:
@@ -274,7 +280,7 @@ class Seq2SeqModel():
                 decoder_fn_inference = seq2seq.simple_decoder_fn_inference(
                     output_fn=output_fn,
                     encoder_state=self.encoder_state,
-                    embeddings=self.embedding_matrix,
+                    embeddings=self.decoder_embedding_matrix,
                     start_of_sequence_id=self.GO_ID,
                     end_of_sequence_id=self.EOS_ID,
                     maximum_length=tf.reduce_max(self.encoder_inputs_length) + 3,
@@ -313,7 +319,7 @@ class Seq2SeqModel():
                     attention_values=attention_values,
                     attention_score_fn=attention_score_fn,
                     attention_construct_fn=attention_construct_fn,
-                    embeddings=self.embedding_matrix,
+                    embeddings=self.decoder_embedding_matrix,
                     start_of_sequence_id=self.GO_ID,
                     end_of_sequence_id=self.EOS_ID,
                     maximum_length=tf.reduce_max(self.encoder_inputs_length) + 2,

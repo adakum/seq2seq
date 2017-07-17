@@ -164,8 +164,8 @@ def create_model(session):
   #     num_samples = FLAGS.num_samples, forward_only=forward_only, bidirectional=True, lstm_type=FLAGS.lstm_type)
 
   # print the trainable variables
-  # for v in tf.trainable_variables():
-  #   print(v.name)
+  for v in tf.trainable_variables():
+    print(v.name)
 
   ckpt = tf.train.get_checkpoint_state(FLAGS.model_dir)
   print(ckpt)
@@ -296,14 +296,10 @@ def test():
 
 
     while current_step < MAX_ITERATION_COUNT:
-      
       start_time = time.time()
-
       encoder_inputs, encoder_input_len, decoder_inputs, decoder_targets, decoder_input_len, loss_weights = model.test_get_batch(len_from = 4, len_to = 8, vocab_lower=4, vocab_upper=11, batch_size=20)
       loss_track = []
-      
       fd = model.make_input_data_feed_dict(encoder_inputs, encoder_input_len, decoder_inputs, decoder_targets, decoder_input_len, loss_weights, FLAGS.input_keep_prob, FLAGS.output_keep_prob, FLAGS.state_keep_prob)
-
       _ , loss = sess.run([model.train_op, model.loss], fd)
       # break
       if current_step % FLAGS.steps_per_checkpoint == 0:
