@@ -13,6 +13,8 @@ class Seq2SeqModel():
 
 
     def __init__(self, encoder_cell_size, vocab_size, embedding_size, optimizer,
+                 encoder_embedding_matrix=None,
+                 decoder_embedding_matrix=None,
                  bidirectional=True,
                  attention=False,
                  debug=False,
@@ -50,19 +52,19 @@ class Seq2SeqModel():
         print("EOS_ID :{}".format(self.EOS_ID))  
         print("PAD_ID :{}".format(self.PAD_ID))
         print(" GO_ID :{}".format(self.GO_ID))        
-        self._make_graph()
+        self._make_graph(encoder_embedding_matrix, decoder_embedding_matrix)
 
     @property
     def decoder_hidden_units(self):
         # @TODO: is this correct for LSTMStateTuple?
         return self.decoder_cell.output_size
 
-    def _make_graph(self):
+    def _make_graph(self, encoder_embedding_matrix, decoder_embedding_matrix):
         self._init_placeholders()
         self._init_cells()
 
         # self._init_decoder_train_connectors()
-        self._init_embeddings()
+        self._init_embeddings(encoder_embedding_matrix, decoder_embedding_matrix)
 
         if self.bidirectional:
             self._init_bidirectional_encoder()
@@ -188,24 +190,39 @@ class Seq2SeqModel():
 
     #         self.loss_weights = tf.ones([batch_size, tf.reduce_max(self.decoder_train_length)], dtype = tf.float32, name="loss_weights")
 
-    def _init_embeddings(self):
+    def _init_embeddings(self, encoder_embedding_matrix, decoder_embedding_matrix):
         with tf.variable_scope("embedding") as scope:
 
             # Uniform(-sqrt(3), sqrt(3)) has variance=1.
             sqrt3 = math.sqrt(3)
             initializer = tf.random_uniform_initializer(-sqrt3, sqrt3)
+            if encoder_embedding_matrix != None:
+                self.encoder_embedding_matrix = tf.get_variable(
+                    name = "encoder_embedding_matrix",
+                    shape=[self.vocab_size, self.embedding_size],
+                    initializer=tf.constant_initializer(np.array(encoder_embedding_matrix)),
+                    dtype = tf.float32,
+                    trainable = False)
+            else:
+                self.encoder_embedding_matrix = tf.get_variable(
+                    name = "encoder_embedding_matrix",
+                    shape=[self.vocab_size, self.embedding_size],
+                    initializer=initializer,
+                    dtype=tf.float32)
 
-            self.encoder_embedding_matrix = tf.get_variable(
-                name = "encoder_embedding_matrix",
-                shape=[self.vocab_size, self.embedding_size],
-                initializer=initializer,
-                dtype=tf.float32)
-
-            self.decoder_embedding_matrix = tf.get_variable(
-                name = "decoder_embedding_matrix",
-                shape=[self.vocab_size, self.embedding_size],
-                initializer=initializer,
-                dtype=tf.float32)
+            if decoder_embedding_matrix!=None:
+                self.decoder_embedding_matrix = tf.get_variable(
+                    name = "decoder_embedding_matrix",
+                    shape=[self.vocab_size, self.embedding_size],
+                    initializer=tf.constant_initializer(np.array(decoder_embedding_matrix)),
+                    dtype=tf.float32,
+                    trainable = False)
+            else:
+                self.decoder_embedding_matrix = tf.get_variable(
+                    name = "decoder_embedding_matrix",
+                    shape=[self.vocab_size, self.embedding_size],
+                    initializer=initializer,
+                    dtype=tf.float32)
 
             self.encoder_inputs_embedded = tf.nn.embedding_lookup(self.encoder_embedding_matrix, self.encoder_inputs)
 

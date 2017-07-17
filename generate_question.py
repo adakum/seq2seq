@@ -50,7 +50,7 @@ tf.app.flags.DEFINE_string("model_dir", "default/","master file to write models 
 tf.app.flags.DEFINE_string("test_file", "dev.in","test file to read")
 # tf.app.flags.DEFINE_string("model_folder", str(os.path.join("/hdfs/pnrsy/sys/jobs", "models")),"master file to write models to")
 tf.app.flags.DEFINE_string("data_dir", "./TrainingData", "Data directory")
-tf.app.flags.DEFINE_string("embedding_file", "glove.840B.300d.txt", "Data directory")
+tf.app.flags.DEFINE_string("embedding_file", "D:/Data/glove.42B.300d/glove.42B.300d.txt", "Data directory")
 
 tf.app.flags.DEFINE_string("train_dir", "./models", "Training directory.") # this is not actually used
 # tf.app.flags.DEFINE_string("second_data_dir", sys.argv[1], 'Training directory.')
@@ -87,17 +87,42 @@ if not os.path.exists(FLAGS.model_dir):
 print(".................... Printing Parameters end .....................")
 
 def load_embedding(file_path):
-  f = open(file_path, "r")
+  f = open(file_path, "r", encoding="utf-8")
   embedding = {}
   all_words = f.readlines()
+  count = 0 
   for x in all_words:
-    w_rep = x.split(' ')
+    w_rep = x.strip()
+    w_rep = w_rep.split(' ')
     word = w_rep[0]
     rep  = [float(x) for x in w_rep[1:]]
     embedding[word] = rep
+    count = count + 1
   return embedding
  
+def get_embedding_matrix(embedding, embedding_size,  rev_en_vocab, vocab_size):
+  embedding_matrix = []
 
+  # increase dim to incorporate PAD, GO etc 
+  for word, rep in embedding.items():
+    embedding[word] = embedding[word] + [0.0, 0.0, 0.0, 0.0] # introducting 4 new dimensions 
+
+  # add PAD, GO, EOS, UNK
+  embedding["_PAD"] = [0.0]*embedding_size + [1.0,0.0,0.0,0.0]
+  embedding["_GO"]  = [0.0]*embedding_size + [0.0,1.0,0.0,0.0]
+  embedding["_EOS"] = [0.0]*embedding_size + [0.0,0.0,1.0,0.0]
+  embedding["_UNK"] = [0.0]*embedding_size + [0.0,0.0,0.0,1.0]
+
+  for idx in range(FLAGS.vocab_size):
+    # get word for this index
+    word = rev_en_vocab[idx]
+    # get rep for this word
+    rep = embedding[word]
+
+    # add to embedding_matrix 
+    embedding_matrix = embedding_matrix + [rep]
+
+  return embedding_matrix   
 
 def read_data(source_path, target_path, max_size=None):
   """Read data from source and target files and put into buckets.
@@ -139,14 +164,14 @@ def read_data(source_path, target_path, max_size=None):
   return data_set
 
 
-def create_model(session):
+def create_model(session, encoder_embedding_matrix, decoder_embedding_matrix):
   """Create translation model and initialize or load parameters in session."""
   
   print("To-Do Items in this !!")
   # Check later
   # _buckets use nai hua
   # max gradient norm
-
+  print("FLAGS.embedding_size > {}".format(FLAGS.embedding_size))
   model = Seq2SeqModel(encoder_cell_size=FLAGS.size,
                          vocab_size=FLAGS.en_vocab_size,
                          embedding_size=FLAGS.embedding_size,
@@ -155,7 +180,9 @@ def create_model(session):
                          bidirectional=FLAGS.use_bidirectional,
                          num_layers = FLAGS.num_layers,
                          learning_rate = FLAGS.learning_rate,
-                         optimizer = "adam")
+                         optimizer = "adam",
+                         encoder_embedding_matrix = encoder_embedding_matrix,
+                         decoder_embedding_matrix = decoder_embedding_matrix)              
 
   # model = Seq2SeqModel(
   #     FLAGS.en_vocab_size, FLAGS.fr_vocab_size, _buckets,
@@ -188,13 +215,30 @@ def train():
   
   print("Master, Going to get GLOVE!")
   embedding_file = os.path.join(FLAGS.data_dir, FLAGS.embedding_file)
-  embedding = load_embedding(embedding_file)
+  # embedding_file =  FLAGS.embedding_file
+  embedding      = load_embedding(embedding_file)
   print("Master, GLOVE Done")
   
+  en_vocab_path       = os.path.join(FLAGS.data_dir, "vocab%d.in"  % FLAGS.en_vocab_size)
+  fr_vocab_path       = os.path.join(FLAGS.data_dir, "vocab%d.out" % FLAGS.fr_vocab_size)
+  _, rev_en_vocab     = data_utils.initialize_vocabulary(en_vocab_path)
+  _, rev_fr_vocab     = data_utils.initialize_vocabulary(fr_vocab_path)
+
+  encoder_embedding_matrix = get_embedding_matrix(embedding, FLAGS.embedding_size, rev_en_vocab, FLAGS.en_vocab_size)
+  decoder_embedding_matrix = get_embedding_matrix(embedding, FLAGS.embedding_size, rev_fr_vocab, FLAGS.fr_vocab_size)
+
+  # freeing the memory for embedding
+  embedding = None
+
+  # dim increased to incorporate PAD,GO etc
+  FLAGS.embedding_size = FLAGS.embedding_size + 4
+
   with tf.Session() as sess:
+    
     # Create model.
     print("Creating Model")
-    model = create_model(sess)
+    model = create_model(sess, encoder_embedding_matrix, decoder_embedding_matrix)
+    
     # Read data into buckets and compute their sizes.
     print ("Reading development and training data (limit: %d)."% FLAGS.max_train_data_size)
     print("en_dev Path : " + en_dev )
@@ -205,19 +249,7 @@ def train():
     train_set = read_data(en_train, fr_train, FLAGS.max_train_data_size)
     print("Training Data read")
     train_bucket_sizes = [len(train_set[b]) for b in range(len(_buckets))]
-
-    # loading
-    en_vocab_path       = os.path.join(FLAGS.data_dir, "vocab%d.in"  % FLAGS.en_vocab_size)
-    fr_vocab_path       = os.path.join(FLAGS.data_dir, "vocab%d.out" % FLAGS.fr_vocab_size)
-    _, rev_en_vocab     = data_utils.initialize_vocabulary(en_vocab_path)
-    _, rev_fr_vocab     = data_utils.initialize_vocabulary(fr_vocab_path)
-
-
-    print("**** Bucket Sizes :  ")
-    print(dev_bucket_sizes)
-    print(train_bucket_sizes)
-    print("****")
-
+    
     train_total_size = float(sum(train_bucket_sizes))
 
     # A bucket scale is a list of increasing numbers from 0 to 1 that we'll use
