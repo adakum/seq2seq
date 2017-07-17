@@ -50,6 +50,8 @@ tf.app.flags.DEFINE_string("model_dir", "default/","master file to write models 
 tf.app.flags.DEFINE_string("test_file", "dev.in","test file to read")
 # tf.app.flags.DEFINE_string("model_folder", str(os.path.join("/hdfs/pnrsy/sys/jobs", "models")),"master file to write models to")
 tf.app.flags.DEFINE_string("data_dir", "./TrainingData", "Data directory")
+tf.app.flags.DEFINE_string("embedding_file", "glove.840B.300d.txt", "Data directory")
+
 tf.app.flags.DEFINE_string("train_dir", "./models", "Training directory.") # this is not actually used
 # tf.app.flags.DEFINE_string("second_data_dir", sys.argv[1], 'Training directory.')
 FLAGS = tf.app.flags.FLAGS
@@ -83,6 +85,19 @@ if not os.path.exists(FLAGS.model_dir):
   print("Created Folder !")
 
 print(".................... Printing Parameters end .....................")
+
+def load_embedding(file_path):
+  f = open(file_path, "r")
+  embedding = {}
+  all_words = f.readlines()
+  for x in all_words:
+    w_rep = x.split(' ')
+    word = w_rep[0]
+    rep  = [float(x) for x in w_rep[1:]]
+    embedding[word] = rep
+  return embedding
+ 
+
 
 def read_data(source_path, target_path, max_size=None):
   """Read data from source and target files and put into buckets.
@@ -170,7 +185,12 @@ def create_model(session):
 def train():
   print("Preparing Q2Q data in %s" % FLAGS.data_dir)
   en_train, fr_train, en_dev, fr_dev, _, _ = data_utils.prepare_q2q_data(FLAGS.data_dir, FLAGS.en_vocab_size, FLAGS.fr_vocab_size)
-
+  
+  print("Master, Going to get GLOVE!")
+  embedding_file = os.path.join(FLAGS.data_dir, FLAGS.embedding_file)
+  embedding = load_embedding(embedding_file)
+  print("Master, GLOVE Done")
+  
   with tf.Session() as sess:
     # Create model.
     print("Creating Model")
@@ -185,6 +205,13 @@ def train():
     train_set = read_data(en_train, fr_train, FLAGS.max_train_data_size)
     print("Training Data read")
     train_bucket_sizes = [len(train_set[b]) for b in range(len(_buckets))]
+
+    # loading
+    en_vocab_path       = os.path.join(FLAGS.data_dir, "vocab%d.in"  % FLAGS.en_vocab_size)
+    fr_vocab_path       = os.path.join(FLAGS.data_dir, "vocab%d.out" % FLAGS.fr_vocab_size)
+    _, rev_en_vocab     = data_utils.initialize_vocabulary(en_vocab_path)
+    _, rev_fr_vocab     = data_utils.initialize_vocabulary(fr_vocab_path)
+
 
     print("**** Bucket Sizes :  ")
     print(dev_bucket_sizes)
@@ -206,11 +233,6 @@ def train():
     model_checkpoint_list = [] # maintain list of past checkpoints
 
 
-    en_vocab_path   = os.path.join(FLAGS.data_dir,"vocab%d.in" % FLAGS.en_vocab_size)
-    fr_vocab_path   = os.path.join(FLAGS.data_dir,"vocab%d.out" % FLAGS.fr_vocab_size)
-    _, rev_en_vocab     = data_utils.initialize_vocabulary(en_vocab_path)
-    _, rev_fr_vocab = data_utils.initialize_vocabulary(fr_vocab_path)
-    saver = tf.train.Saver(max_to_keep=1) 
 
     while current_step < MAX_ITERATION_COUNT:
       # Choose a bucket according to data distribution. We pick a random number
