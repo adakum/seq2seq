@@ -10,8 +10,11 @@ import data_utils
 tf.reset_default_graph()
 tf.set_random_seed(1)
 
-tf.app.flags.DEFINE_float("learning_rate", 2, "Learning rate.")
+tf.app.flags.DEFINE_float("learning_rate", 0.03, "Learning rate.")
 tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.95,"Learning rate decays by this much.")
+
+# tf.app.flags.DEFINE_integer("optimizer", "adam", "which optimizer - adam, gradientDescent")
+
 tf.app.flags.DEFINE_float("max_gradient_norm", 5.0, "Clip gradients to this norm.")
 tf.app.flags.DEFINE_integer("batch_size", 128,"Batch size to use during training.")
 tf.app.flags.DEFINE_integer("size", 512, "Size of each model layer.")
@@ -50,8 +53,8 @@ tf.app.flags.DEFINE_string("data_dir", "./TrainingData", "Data directory")
 tf.app.flags.DEFINE_string("train_dir", "./models", "Training directory.") # this is not actually used
 # tf.app.flags.DEFINE_string("second_data_dir", sys.argv[1], 'Training directory.')
 FLAGS = tf.app.flags.FLAGS
-_buckets = [(3, 7), (5, 12), (7, 17), (9, 20)]
-# _buckets = [(10,15)]
+_buckets = [(2, 11), (4, 12), (6, 17), (7, 20)]
+# _buckets = [(10, 11)]
 
 print("TF Version : %s", tf.__version__)
 print(".....................Printing Parameters.........................")
@@ -135,7 +138,9 @@ def create_model(session):
                          attention=FLAGS.use_attention,
                          dropout=FLAGS.dropout,
                          bidirectional=FLAGS.use_bidirectional,
-                         num_layers = FLAGS.num_layers)
+                         num_layers = FLAGS.num_layers,
+                         learning_rate = FLAGS.learning_rate,
+                         optimizer = "adam")
 
   # model = Seq2SeqModel(
   #     FLAGS.en_vocab_size, FLAGS.fr_vocab_size, _buckets,
@@ -200,11 +205,17 @@ def train():
     previous_losses = []
     model_checkpoint_list = [] # maintain list of past checkpoints
 
+
+    en_vocab_path   = os.path.join(FLAGS.data_dir,"vocab%d.in" % FLAGS.en_vocab_size)
+    fr_vocab_path   = os.path.join(FLAGS.data_dir,"vocab%d.out" % FLAGS.fr_vocab_size)
+    _, rev_en_vocab     = data_utils.initialize_vocabulary(en_vocab_path)
+    _, rev_fr_vocab = data_utils.initialize_vocabulary(fr_vocab_path)
+    saver = tf.train.Saver(max_to_keep=1) 
+
     while current_step < MAX_ITERATION_COUNT:
       # Choose a bucket according to data distribution. We pick a random number
       # in [0, 1] and use the corresponding interval in train_buckets_scale.
       
-      print("Current Step > {}".format(current_step))
       random_number_01 = np.random.random_sample()
       bucket_id = min([i for i in range(len(train_buckets_scale))
                        if train_buckets_scale[i] > random_number_01])
@@ -212,8 +223,8 @@ def train():
       # Get a batch and make a step.
       start_time = time.time()
 
-      encoder_inputs, encoder_input_len, decoder_inputs, decoder_targets, decoder_input_len, loss_weights = model.get_batch(train_set, bucket_id, _buckets, FLAGS.batch_size)
-      
+      # encoder_inputs, encoder_input_len, decoder_inputs, decoder_targets, decoder_input_len, loss_weights = model.get_batch(train_set, bucket_id, _buckets, FLAGS.batch_size)
+      encoder_inputs, encoder_input_len, decoder_inputs, decoder_targets, decoder_input_len, loss_weights = model.test_get_batch(len_from = 4, len_to = 8, vocab_lower=4, vocab_upper=11, batch_size=20)
       loss_track = []
       
       fd = model.make_input_data_feed_dict(encoder_inputs, encoder_input_len, decoder_inputs, decoder_targets, decoder_input_len, loss_weights, FLAGS.input_keep_prob, FLAGS.output_keep_prob, FLAGS.state_keep_prob)
@@ -221,57 +232,83 @@ def train():
       # run model 
       _ , loss = sess.run([model.train_op, model.loss], fd)
       # break
-      print("Loss > {}".format(loss))
-      loss_track.append(loss)
-       
-      for i, (e_in, dt_pred) in enumerate(zip(
-              fd[model.encoder_inputs],
-              sess.run(model.decoder_prediction_train, fd)
-          )):
-          print('  sample {}:'.format(i + 1))
-          print('    enc input           > {}'.format(e_in))
-          print('    dec train predicted > {}'.format(dt_pred))
-          print('    dec train actual > {}'.format(fd[model.decoder_train_targets][i]))
+      if current_step % FLAGS.steps_per_checkpoint == 0:
+        print("Current Step > {}".format(model.global_step.eval()))
+        print("Loss > {}".format(loss))
+        loss_track.append(loss)
 
-          if i >= 2:
-              break
+        # save model  
+        print("Master, Going to Save Model !")
+        model_checkpoint_path = os.path.join(FLAGS.model_dir, "my-model")
+        model.saver.save(sess, model_checkpoint_path, global_step = model.global_step) 
+        print("Master, Saving Successful !")
+        
+        for i, (e_in, dt_pred) in enumerate(zip(
+                fd[model.encoder_inputs],
+                sess.run(model.decoder_prediction_train, fd)
+            )):
+            print('  sample {}:'.format(i + 1))
+            print('    enc input           > {}'.format(' '.join([rev_en_vocab[x] for x in e_in])))
+            print('    dec train predicted > {}'.format(' '.join([rev_fr_vocab[x] for x in dt_pred])))
+            print('    dec train actual > {}'.format(' '.join([rev_fr_vocab[x] for x in fd[model.decoder_train_targets][i]])))
+
+            if i >= 10:
+                break
 
       # step_time += (time.time() - start_time) / FLAGS.steps_per_checkpoint
       current_step += 1
 
-      # # Once in a while, we save checkpoint, print statistics, and run evals.
-      # if current_step % FLAGS.steps_per_checkpoint == 0:
-      #   if FLAGS.local is False:
-      #     tmp_model_checkpoint_path = os.path.join(FLAGS.tmp_model_folder, "model.ckpt-" + str(current_step))
-      #     # model_checkpoint_path = os.path.join(FLAGS.model_dir, "model.ckpt-" + str(current_step))
-      #     model_checkpoint_path = os.path.join(FLAGS.model_dir, "my-model")
-      #     tmp_checkpoint_path   = os.path.join(FLAGS.tmp_model_folder, "checkpoint")
-      #     # checkpoint_path = os.path.join("/hdfs/pnrsy/sys/jobs", os.environ['PHILLY_JOB_ID'], "models", "translate.ckpt")
-      #     checkpoint_path = os.path.join(FLAGS.model_dir, "checkpoint")
 
-      #     if not os.path.exists(FLAGS.model_dir):
-      #       os.makedirs(FLAGS.model_dir)
-      #       print("Created Folder !")
-      #     try:
-      #       # print(tmp_checkpoint_path)
-      #       # print(tmp_model_checkpoint_path)
-      #       print(model_checkpoint_path)
-      #       model.saver.save(sess, model_checkpoint_path, global_step=model.global_step)
-      #       print("Saved Model")
-      #       # model_checkpoint_list.append(model_checkpoint_path)
-      #     except Exception as e:
-      #      print("FAILED TO COPY FOR CHECKPOINT FOR FILE %s" % model_checkpoint_path)
-      #      try:
-      #        print(e.message)
-      #      except Exception as ee:
-      #        print("NO EXCEPTION MESSAGE")
-      #     if len(model_checkpoint_list) > 5:
-      #       os.remove(model_checkpoint_list[0])
-      #       model_checkpoint_list.pop(0)
-      #   else:
-      #     checkpoint_path = os.path.join(FLAGS.train_dir, "translate.ckpt")
-      #     # model.saver.save(sess, checkpoint_path, global_step=model.global_step)
 
+def test():
+  print("Testing")
+  with tf.Session() as sess:
+    # Create model.
+    print("Creating Model")
+    model = create_model(sess)
+
+    step_time, loss = 0.0, 0.0
+    current_step = 0
+    previous_losses = []
+    model_checkpoint_list = [] # maintain list of past checkpoints
+
+
+    while current_step < MAX_ITERATION_COUNT:
+      
+      start_time = time.time()
+
+      encoder_inputs, encoder_input_len, decoder_inputs, decoder_targets, decoder_input_len, loss_weights = model.test_get_batch(len_from = 4, len_to = 8, vocab_lower=4, vocab_upper=11, batch_size=20)
+      loss_track = []
+      
+      fd = model.make_input_data_feed_dict(encoder_inputs, encoder_input_len, decoder_inputs, decoder_targets, decoder_input_len, loss_weights, FLAGS.input_keep_prob, FLAGS.output_keep_prob, FLAGS.state_keep_prob)
+
+      _ , loss = sess.run([model.train_op, model.loss], fd)
+      # break
+      if current_step % FLAGS.steps_per_checkpoint == 0:
+        print("Current Step > {}".format(model.global_step.eval()))
+        print("Loss > {}".format(loss))
+        loss_track.append(loss)
+
+        # save model  
+        # print("Master, Going to Save Model !")
+        # model_checkpoint_path = os.path.join(FLAGS.model_dir, "my-model")
+        # model.saver.save(sess, model_checkpoint_path, global_step = model.global_step) 
+        # print("Master, Saving Successful !")
+        
+        for i, (e_in, dt_pred) in enumerate(zip(
+                fd[model.encoder_inputs],
+                sess.run(model.decoder_prediction_train, fd)
+            )):
+            print('  sample {}:'.format(i + 1))
+            print('    enc input           > {}'.format(e_in))
+            print('    dec train predicted > {}'.format(dt_pred))
+            print('    dec train actual > {}'.format(fd[model.decoder_train_targets][i]))
+
+            if i >= 3:
+                break
+
+      # step_time += (time.time() - start_time) / FLAGS.steps_per_checkpoint
+      current_step += 1
 
 
 def decode():
@@ -344,6 +381,8 @@ def decode():
 def main(_):
   if FLAGS.decode:
     decode()
+  elif FLAGS.self_test:
+    test()
   else:
     train()
 

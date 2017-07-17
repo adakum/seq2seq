@@ -12,7 +12,7 @@ class Seq2SeqModel():
     Requires TF 1.0.0-alpha"""
 
 
-    def __init__(self, encoder_cell_size, vocab_size, embedding_size,
+    def __init__(self, encoder_cell_size, vocab_size, embedding_size, optimizer,
                  bidirectional=True,
                  attention=False,
                  debug=False,
@@ -20,13 +20,17 @@ class Seq2SeqModel():
                  PAD_ID=0,
                  GO_ID =1,
                  EOS_ID=2,
-                 num_layers=1):
+                 num_layers=1,
+                 learning_rate=1):
 
         # self.debug = debug
+
+        self.optimizer = optimizer
         self.bidirectional = bidirectional
         self.attention = attention
         self.num_layers = num_layers
         self.dropout = dropout
+        self.learning_rate = learning_rate
 
         self.vocab_size = vocab_size
         self.embedding_size = embedding_size
@@ -69,6 +73,9 @@ class Seq2SeqModel():
 
         self._init_optimizer()
 
+        # initialize saver once the graph has been created, otherwise tf.all_variables() will have nothing 
+        self.saver = tf.train.Saver(tf.all_variables(), pad_step_number=True)
+
     def _init_cells(self):
 
         if self.dropout is not None:
@@ -90,7 +97,10 @@ class Seq2SeqModel():
 
     def _init_placeholders(self):
 
+        self.global_step = tf.Variable(0, trainable=False)
+
         # A list of 1D int32 Tensors of shape [batch_size].
+    
         self.encoder_inputs = tf.placeholder(
             shape = [None, None],
             dtype = tf.int32,
@@ -346,7 +356,13 @@ class Seq2SeqModel():
         logits  = self.decoder_logits_train
         targets = self.decoder_train_targets
         self.loss     = seq2seq.sequence_loss(logits=logits, targets=targets, weights=self.loss_weights)
-        self.train_op = tf.train.AdamOptimizer().minimize(self.loss)
+
+        if self.optimizer=="adam":
+            print("using adam")
+            self.train_op = tf.train.AdamOptimizer().minimize(self.loss, global_step=self.global_step)
+        else :
+            self.train_op = tf.train.GradientDescentOptimizer(self.learning_rate).minimize(self.loss)
+
 
     def make_train_inputs(self, input_seq, target_seq):
         inputs_, inputs_length_ = helpers.batch(input_seq)
@@ -395,6 +411,55 @@ class Seq2SeqModel():
             self.encoder_inputs: input_seq,
             self.encoder_inputs_length: input_seq_len,
         }
+
+    def test_get_batch(self, len_from, len_to, vocab_lower, vocab_upper, batch_size):
+
+        def random_length():
+            if len_from == len_to:
+                return len_from
+            return np.random.randint(len_from, len_to + 1)
+
+        encoder_inputs = [
+                            np.random.randint(low=vocab_lower,
+                                              high=vocab_upper,
+                                              size=random_length()).tolist()
+                            for _ in range(batch_size)
+                            ]
+
+        decoder_input = encoder_inputs
+
+        real_encoder_input_len = []
+        real_decoder_input_len = []
+
+
+        input_seq = encoder_inputs
+        output_seq = encoder_inputs
+
+        encoder_inputs_len = [len(x) for x in input_seq]
+        decoder_inputs_len = [len(x) + 1 for x in output_seq] 
+
+        max_encoder_inputs_len = max(encoder_inputs_len) 
+        max_decoder_inputs_len = max(decoder_inputs_len) 
+
+        # encoder input
+        padded_encoder_inputs = [x + [self.PAD_ID]*(max_encoder_inputs_len - len(x)) for x in input_seq]
+        
+        # decoder input and target
+        padded_decoder_inputs  = [[self.GO_ID] + x + [self.PAD_ID]*(max_decoder_inputs_len - len(x) -1)  for x in output_seq]
+        padded_decoder_targets = [x + [self.EOS_ID] + [self.PAD_ID]*(max_decoder_inputs_len - len(x) -1) for x in output_seq]
+
+        batch_weights = np.ones([batch_size, max_decoder_inputs_len])
+
+        for batch_idx in range(batch_size):
+            for len_idx in range(max_decoder_inputs_len):
+                # encoder input's format is GO_ID, word_1, word_2, .... , word_n, PAD, PAD, PAD
+                # EOS_ID is not in encoder_input
+                # batch_wieght =0 for index where value is PAD
+                if padded_decoder_inputs[batch_idx][len_idx] == self.PAD_ID:
+                    batch_weights[batch_idx, len_idx] = 0
+
+        return padded_encoder_inputs, encoder_inputs_len,  padded_decoder_inputs, padded_decoder_targets, decoder_inputs_len, batch_weights
+    
 
     def get_batch(self, data, bucket_id, buckets, batch_size):
         """Get a random batch of data from the specified bucket, prepare for step.
