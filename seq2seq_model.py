@@ -210,6 +210,7 @@ class Seq2SeqModel():
                     initializer=initializer,
                     dtype=tf.float32)
 
+
             if decoder_embedding_matrix!=None:
                 self.decoder_embedding_matrix = tf.get_variable(
                     name = "decoder_embedding_matrix",

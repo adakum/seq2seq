@@ -100,28 +100,35 @@ def load_embedding(file_path):
     count = count + 1
   return embedding
  
-def get_embedding_matrix(embedding, embedding_size,  rev_en_vocab, vocab_size):
+def get_embedding_matrix(embedding, embedding_size,  rev_vocab, vocab_size):
+  temp_embedding = dict(embedding)
   embedding_matrix = []
-
   # increase dim to incorporate PAD, GO etc 
-  for word, rep in embedding.items():
-    embedding[word] = embedding[word] + [0.0, 0.0, 0.0, 0.0] # introducting 4 new dimensions 
+  for word, rep in temp_embedding.items():
+    temp_embedding[word] = temp_embedding[word] + [0.0, 0.0, 0.0, 0.0] # introducting 4 new dimensions 
 
   # add PAD, GO, EOS, UNK
-  embedding["_PAD"] = [0.0]*embedding_size + [1.0,0.0,0.0,0.0]
-  embedding["_GO"]  = [0.0]*embedding_size + [0.0,1.0,0.0,0.0]
-  embedding["_EOS"] = [0.0]*embedding_size + [0.0,0.0,1.0,0.0]
-  embedding["_UNK"] = [0.0]*embedding_size + [0.0,0.0,0.0,1.0]
+  temp_embedding["_PAD"] = [0.0]*embedding_size + [1.0,0.0,0.0,0.0]
+  temp_embedding["_GO"]  = [0.0]*embedding_size + [0.0,1.0,0.0,0.0]
+  temp_embedding["_EOS"] = [0.0]*embedding_size + [0.0,0.0,1.0,0.0]
+  temp_embedding["_UNK"] = [0.0]*embedding_size + [0.0,0.0,0.0,1.0]
 
-  for idx in range(FLAGS.vocab_size):
+  unknown_words = 0
+  for idx in range(vocab_size):
     # get word for this index
-    word = rev_en_vocab[idx]
+    word = rev_vocab[idx]
     # get rep for this word
-    rep = embedding[word]
+    try:
+      rep = temp_embedding[word]
+    except Exception as e:
+      rep = temp_embedding["_UNK"]
+      unknown_words = unknown_words + 1
 
     # add to embedding_matrix 
+
     embedding_matrix = embedding_matrix + [rep]
 
+  print("Words not found in GLOVE > {}".format(unknown_words))
   return embedding_matrix   
 
 def read_data(source_path, target_path, max_size=None):
@@ -224,13 +231,15 @@ def train():
   _, rev_en_vocab     = data_utils.initialize_vocabulary(en_vocab_path)
   _, rev_fr_vocab     = data_utils.initialize_vocabulary(fr_vocab_path)
 
-  encoder_embedding_matrix = get_embedding_matrix(embedding, FLAGS.embedding_size, rev_en_vocab, FLAGS.en_vocab_size)
+
   decoder_embedding_matrix = get_embedding_matrix(embedding, FLAGS.embedding_size, rev_fr_vocab, FLAGS.fr_vocab_size)
+  encoder_embedding_matrix = get_embedding_matrix(embedding, FLAGS.embedding_size, rev_en_vocab, FLAGS.en_vocab_size)
 
   # freeing the memory for embedding
   embedding = None
 
   # dim increased to incorporate PAD,GO etc
+  # each PAD,GO etc introduced a new dimension
   FLAGS.embedding_size = FLAGS.embedding_size + 4
 
   with tf.Session() as sess:
@@ -276,9 +285,7 @@ def train():
 
       # Get a batch and make a step.
       start_time = time.time()
-
-      # encoder_inputs, encoder_input_len, decoder_inputs, decoder_targets, decoder_input_len, loss_weights = model.get_batch(train_set, bucket_id, _buckets, FLAGS.batch_size)
-      encoder_inputs, encoder_input_len, decoder_inputs, decoder_targets, decoder_input_len, loss_weights = model.test_get_batch(len_from = 4, len_to = 8, vocab_lower=4, vocab_upper=11, batch_size=20)
+      encoder_inputs, encoder_input_len, decoder_inputs, decoder_targets, decoder_input_len, loss_weights = model.get_batch(train_set, bucket_id, _buckets, FLAGS.batch_size)
       loss_track = []
       
       fd = model.make_input_data_feed_dict(encoder_inputs, encoder_input_len, decoder_inputs, decoder_targets, decoder_input_len, loss_weights, FLAGS.input_keep_prob, FLAGS.output_keep_prob, FLAGS.state_keep_prob)

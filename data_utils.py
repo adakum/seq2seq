@@ -30,10 +30,17 @@ from six.moves import urllib
 from tensorflow.python.platform import gfile
 
 # Special vocabulary symbols - we always put them at the start.
-_PAD = b"_PAD"
-_GO = b"_GO"
-_EOS = b"_EOS"
-_UNK = b"_UNK"
+# _PAD = b"_PAD"
+# _GO = b"_GO"
+# _EOS = b"_EOS"
+# _UNK = b"_UNK"
+
+_PAD = "_PAD"
+_GO = "_GO"
+_EOS = "_EOS"
+_UNK = "_UNK"
+
+
 _START_VOCAB = [_PAD, _GO, _EOS, _UNK]
 
 PAD_ID = 0
@@ -142,6 +149,7 @@ def create_vocabulary(vocabulary_path, data_path, max_vocabulary_size,tokenizer=
         counter += 1
         if counter % 100000 == 0:
           print("  processing line %d" % counter)
+
         tokens = tokenizer(line) if tokenizer else basic_tokenizer(line)
         for w in tokens:
           word = re.sub(_DIGIT_RE, "0", w) if normalize_digits else w
@@ -152,6 +160,7 @@ def create_vocabulary(vocabulary_path, data_path, max_vocabulary_size,tokenizer=
       vocab_list = _START_VOCAB + sorted(vocab, key=vocab.get, reverse=True)
       if len(vocab_list) > max_vocabulary_size:
         vocab_list = vocab_list[:max_vocabulary_size]
+      
       with gfile.GFile(vocabulary_path, mode="w") as vocab_file:
         for w in vocab_list:
           vocab_file.write(w + "\n")
@@ -232,7 +241,6 @@ def data_to_token_ids(data_path, target_path, vocabulary_path,tokenizer=None, no
       if None, basic_tokenizer will be used.
     normalize_digits: Boolean; if true, all digits are replaced by 0s.
   """
-  print(data_path)
   if not gfile.Exists(target_path):
     print("Tokenizing data in %s" % data_path)
     vocab, _ = initialize_vocabulary(vocabulary_path)
@@ -281,7 +289,7 @@ def prepare_q2q_data(data_dir, en_vocabulary_size, fr_vocabulary_size, tokenizer
   fr_train_ids_path = train_path + (".ids%d.out" % fr_vocabulary_size)
   en_train_ids_path = train_path + (".ids%d.in" % en_vocabulary_size)
   data_to_token_ids(train_path + ".out", fr_train_ids_path, fr_vocab_path, tokenizer)
-  data_to_token_ids(train_path + ".in", en_train_ids_path, en_vocab_path, tokenizer)
+  data_to_token_ids(train_path + ".in" , en_train_ids_path, en_vocab_path, tokenizer)
 
   # Create token ids for the development data.
   fr_dev_ids_path = dev_path + (".ids%d.out" % fr_vocabulary_size)
