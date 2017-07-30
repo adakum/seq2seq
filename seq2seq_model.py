@@ -12,7 +12,8 @@ class Seq2SeqModel():
     Requires TF 1.0.0-alpha"""
 
 
-    def __init__(self, encoder_cell_size, vocab_size, embedding_size, optimizer,
+    def __init__(self, encoder_cell_size, vocab_size, embedding_size, optimizer, learning_rate,
+                 learning_rate_decay_factor,
                  encoder_embedding_matrix=None,
                  decoder_embedding_matrix=None,
                  bidirectional=True,
@@ -22,8 +23,7 @@ class Seq2SeqModel():
                  PAD_ID=0,
                  GO_ID =1,
                  EOS_ID=2,
-                 num_layers=1,
-                 learning_rate=1):
+                 num_layers=1,):
 
         # self.debug = debug
 
@@ -32,7 +32,9 @@ class Seq2SeqModel():
         self.attention = attention
         self.num_layers = num_layers
         self.dropout = dropout
-        self.learning_rate = learning_rate
+        self.learning_rate = tf.Variable(float(learning_rate), trainable=False)
+        self.learning_rate_decay_factor = learning_rate_decay_factor
+        self.learning_rate_decay_op = self.learning_rate.assign(self.learning_rate*self.learning_rate_decay_factor)
 
         self.vocab_size = vocab_size
         self.embedding_size = embedding_size
@@ -49,9 +51,11 @@ class Seq2SeqModel():
         self.EOS_ID  = EOS_ID
         self.PAD_ID  = PAD_ID
         self.GO_ID   = GO_ID
+        
         print("EOS_ID :{}".format(self.EOS_ID))  
         print("PAD_ID :{}".format(self.PAD_ID))
         print(" GO_ID :{}".format(self.GO_ID))        
+        
         self._make_graph(encoder_embedding_matrix, decoder_embedding_matrix)
 
     @property
@@ -75,8 +79,17 @@ class Seq2SeqModel():
 
         self._init_optimizer()
 
+
+        self._init_summary()
+
         # initialize saver once the graph has been created, otherwise tf.all_variables() will have nothing 
         self.saver = tf.train.Saver(tf.all_variables(), pad_step_number=True)
+
+    def _init_summary(self):
+        tf.summary.scalar("LossValue", self.loss)
+        tf.summary.scalar("LearningRate", self.learning_rate)
+        self.merged = tf.summary.merge_all()
+
 
     def _init_cells(self):
 
@@ -196,20 +209,20 @@ class Seq2SeqModel():
             # Uniform(-sqrt(3), sqrt(3)) has variance=1.
             sqrt3 = math.sqrt(3)
             initializer = tf.random_uniform_initializer(-sqrt3, sqrt3)
+            
             if encoder_embedding_matrix != None:
                 self.encoder_embedding_matrix = tf.get_variable(
                     name = "encoder_embedding_matrix",
-                    shape=[self.vocab_size, self.embedding_size],
-                    initializer=tf.constant_initializer(np.array(encoder_embedding_matrix)),
-                    dtype = tf.float32,
+                    shape = [self.vocab_size, self.embedding_size],
+                    initializer = tf.constant_initializer(np.array(encoder_embedding_matrix)),
+                    dtype     = tf.float32,
                     trainable = False)
             else:
                 self.encoder_embedding_matrix = tf.get_variable(
-                    name = "encoder_embedding_matrix",
-                    shape=[self.vocab_size, self.embedding_size],
-                    initializer=initializer,
-                    dtype=tf.float32)
-
+                    name  = "encoder_embedding_matrix",
+                    shape = [self.vocab_size, self.embedding_size],
+                    initializer = initializer,
+                    dtype =tf.float32)
 
             if decoder_embedding_matrix!=None:
                 self.decoder_embedding_matrix = tf.get_variable(
@@ -225,8 +238,7 @@ class Seq2SeqModel():
                     initializer=initializer,
                     dtype=tf.float32)
 
-            self.encoder_inputs_embedded = tf.nn.embedding_lookup(self.encoder_embedding_matrix, self.encoder_inputs)
-
+            self.encoder_inputs_embedded       = tf.nn.embedding_lookup(self.encoder_embedding_matrix, self.encoder_inputs)
             self.decoder_train_inputs_embedded = tf.nn.embedding_lookup(self.decoder_embedding_matrix, self.decoder_train_inputs)
 
     def _init_simple_encoder(self):
@@ -246,12 +258,12 @@ class Seq2SeqModel():
               encoder_bw_outputs),
              (encoder_fw_state,
               encoder_bw_state)) = (
-                tf.nn.bidirectional_dynamic_rnn(cell_fw =self.encoder_cell,
-                                                cell_bw =self.encoder_cell,
-                                                inputs  =self.encoder_inputs_embedded,
-                                                sequence_length=self.encoder_inputs_length,
-                                                time_major=False,
-                                                dtype=tf.float32)
+                tf.nn.bidirectional_dynamic_rnn(cell_fw = self.encoder_cell,
+                                                cell_bw = self.encoder_cell,
+                                                inputs  = self.encoder_inputs_embedded,
+                                                sequence_length = self.encoder_inputs_length,
+                                                time_major = False,
+                                                dtype = tf.float32)
                 )
 
             self.encoder_outputs = tf.concat((encoder_fw_outputs, encoder_bw_outputs), 2)
@@ -322,17 +334,17 @@ class Seq2SeqModel():
                 )
 
                 decoder_fn_train  = seq2seq.attention_decoder_fn_train(
-                    encoder_state = self.encoder_state,
-                    attention_keys = attention_keys,
-                    attention_values = attention_values,
-                    attention_score_fn = attention_score_fn,
+                    encoder_state       = self.encoder_state,
+                    attention_keys      = attention_keys,
+                    attention_values    = attention_values,
+                    attention_score_fn  = attention_score_fn,
                     attention_construct_fn = attention_construct_fn,
                     name='attention_decoder'
                 )
 
                 decoder_fn_inference = seq2seq.attention_decoder_fn_inference(
-                    output_fn=output_fn,
-                    encoder_state=self.encoder_state,
+                    output_fn = output_fn,
+                    encoder_state = self.encoder_state,
                     attention_keys=attention_keys,
                     attention_values=attention_values,
                     attention_score_fn=attention_score_fn,
@@ -340,7 +352,7 @@ class Seq2SeqModel():
                     embeddings=self.decoder_embedding_matrix,
                     start_of_sequence_id=self.GO_ID,
                     end_of_sequence_id=self.EOS_ID,
-                    maximum_length=tf.reduce_max(self.encoder_inputs_length) + 2,
+                    maximum_length=tf.reduce_max(self.encoder_inputs_length)*2,
                     num_decoder_symbols=self.vocab_size,
                 )
 
@@ -385,7 +397,7 @@ class Seq2SeqModel():
             print("using adam")
             self.train_op = tf.train.AdamOptimizer().minimize(self.loss, global_step=self.global_step)
         else :
-            self.train_op = tf.train.GradientDescentOptimizer(self.learning_rate).minimize(self.loss)
+            self.train_op = tf.train.GradientDescentOptimizer(self.learning_rate).minimize(self.loss, global_step=self.global_step)
 
 
     def make_train_inputs(self, input_seq, target_seq):
@@ -511,6 +523,11 @@ class Seq2SeqModel():
 
         total_data_len = len(data[bucket_id])
 
+        if total_data_len<=batch_size:
+            print("total_data_len > {}".format(total_data_len))
+            print("batch_size > {}".format(batch_size))
+
+
         random_idx = random.sample(range(total_data_len), batch_size)
         # batch_data = data[random_idx]
         batch_data = [data[bucket_id][x] for x in random_idx]
@@ -602,7 +619,7 @@ class Seq2SeqModel():
         # return batch_encoder_inputs, batch_decoder_inputs, batch_weights
         
         return padded_encoder_inputs, encoder_inputs_len,  padded_decoder_inputs, padded_decoder_targets, decoder_inputs_len, batch_weights
-
+         
 
 def make_seq2seq_model(**kwargs):
     args = dict(encoder_cell=LSTMCell(10),

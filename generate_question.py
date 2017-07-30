@@ -1,9 +1,27 @@
+###############################################
+#       To-DO                                 #
+#   -------------                             #   
+#   1. clip gradients                         #   
+#   2. donot restrain encoding by vocab size  #
+#   3. glove    
+#                                             #   
+#                                             #   
+#                                             #   
+#                                             #   
+#                                             #   
+###############################################
+
 import os,sys,time
 import numpy as np
+import os
+
+os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID" # see issue #152
+os.environ["CUDA_VISIBLE_DEVICES"]="5,6" # Will use only the 3rd and the 4th GPU devices
+
 import tensorflow as tf
 from tensorflow.contrib.rnn import LSTMCell, GRUCell
 from seq2seq_model import Seq2SeqModel#, train
-import pandas as pd
+# import pandas as pd
 import helpers
 import data_utils 
 
@@ -13,7 +31,7 @@ tf.set_random_seed(1)
 tf.app.flags.DEFINE_float("learning_rate", 0.03, "Learning rate.")
 tf.app.flags.DEFINE_float("learning_rate_decay_factor", 0.95,"Learning rate decays by this much.")
 
-# tf.app.flags.DEFINE_integer("optimizer", "adam", "which optimizer - adam, gradientDescent")
+tf.app.flags.DEFINE_string("optimizer", "adam--", "which optimizer - adam, gradientDescent")
 
 tf.app.flags.DEFINE_float("max_gradient_norm", 5.0, "Clip gradients to this norm.")
 tf.app.flags.DEFINE_integer("batch_size", 128,"Batch size to use during training.")
@@ -23,6 +41,7 @@ tf.app.flags.DEFINE_integer("en_vocab_size", 150000, "English vocabulary size.")
 tf.app.flags.DEFINE_integer("fr_vocab_size", 150000, "French vocabulary size.")
 tf.app.flags.DEFINE_integer("num_samples", 512, "Num samples for sampled softmax.")
 tf.app.flags.DEFINE_integer("embedding_size", 300, "Num samples for sampled softmax.")
+tf.app.flags.DEFINE_boolean("use_glove", True, "use GLOVE embedding")
 
 tf.app.flags.DEFINE_integer("dropout",None,"use dropout or not")
 tf.app.flags.DEFINE_integer("input_keep_prob",  1,"use dropout or not")
@@ -50,7 +69,7 @@ tf.app.flags.DEFINE_string("model_dir", "default/","master file to write models 
 tf.app.flags.DEFINE_string("test_file", "dev.in","test file to read")
 # tf.app.flags.DEFINE_string("model_folder", str(os.path.join("/hdfs/pnrsy/sys/jobs", "models")),"master file to write models to")
 tf.app.flags.DEFINE_string("data_dir", "./TrainingData", "Data directory")
-tf.app.flags.DEFINE_string("embedding_file", "D:/Data/glove.42B.300d/glove.42B.300d.txt", "Data directory")
+tf.app.flags.DEFINE_string("embedding_file", "glove.42B.300d.txt", "Data directory")
 
 tf.app.flags.DEFINE_string("train_dir", "./models", "Training directory.") # this is not actually used
 # tf.app.flags.DEFINE_string("second_data_dir", sys.argv[1], 'Training directory.')
@@ -61,6 +80,10 @@ _buckets = [(2, 11), (4, 12), (6, 17), (7, 20)]
 print("TF Version : %s", tf.__version__)
 print(".....................Printing Parameters.........................")
 print("sys.version : " + sys.version)
+if FLAGS.use_glove:
+  print("Using GLOVE")
+else:
+  print("Not using GLOVE")
 print("learning_rate = %f" %  FLAGS.learning_rate)
 print("learning_rate_decay_factor = %f" %  FLAGS.learning_rate_decay_factor)
 print("max_gradient_norm = %d" %  FLAGS.max_gradient_norm)
@@ -114,6 +137,7 @@ def get_embedding_matrix(embedding, embedding_size,  rev_vocab, vocab_size):
   temp_embedding["_UNK"] = [0.0]*embedding_size + [0.0,0.0,0.0,1.0]
 
   unknown_words = 0
+
   for idx in range(vocab_size):
     # get word for this index
     word = rev_vocab[idx]
@@ -125,7 +149,6 @@ def get_embedding_matrix(embedding, embedding_size,  rev_vocab, vocab_size):
       unknown_words = unknown_words + 1
 
     # add to embedding_matrix 
-
     embedding_matrix = embedding_matrix + [rep]
 
   print("Words not found in GLOVE > {}".format(unknown_words))
@@ -179,15 +202,16 @@ def create_model(session, encoder_embedding_matrix, decoder_embedding_matrix):
   # _buckets use nai hua
   # max gradient norm
   print("FLAGS.embedding_size > {}".format(FLAGS.embedding_size))
-  model = Seq2SeqModel(encoder_cell_size=FLAGS.size,
-                         vocab_size=FLAGS.en_vocab_size,
-                         embedding_size=FLAGS.embedding_size,
-                         attention=FLAGS.use_attention,
-                         dropout=FLAGS.dropout,
-                         bidirectional=FLAGS.use_bidirectional,
+  model = Seq2SeqModel(encoder_cell_size = FLAGS.size,
+                         vocab_size = FLAGS.en_vocab_size,
+                         embedding_size = FLAGS.embedding_size,
+                         attention = FLAGS.use_attention,
+                         dropout = FLAGS.dropout,
+                         bidirectional= FLAGS.use_bidirectional,
                          num_layers = FLAGS.num_layers,
+                         optimizer = FLAGS.optimizer,
                          learning_rate = FLAGS.learning_rate,
-                         optimizer = "adam",
+                         learning_rate_decay_factor = FLAGS.learning_rate_decay_factor,
                          encoder_embedding_matrix = encoder_embedding_matrix,
                          decoder_embedding_matrix = decoder_embedding_matrix)              
 
@@ -220,21 +244,26 @@ def train():
   print("Preparing Q2Q data in %s" % FLAGS.data_dir)
   en_train, fr_train, en_dev, fr_dev, _, _ = data_utils.prepare_q2q_data(FLAGS.data_dir, FLAGS.en_vocab_size, FLAGS.fr_vocab_size)
   
-  print("Master, Going to get GLOVE!")
-  embedding_file = os.path.join(FLAGS.data_dir, FLAGS.embedding_file)
-  # embedding_file =  FLAGS.embedding_file
-  embedding      = load_embedding(embedding_file)
-  print("Master, GLOVE Done")
+  if FLAGS.use_glove:
+    print("Master, Going to get GLOVE!")
+    embedding_file = os.path.join(FLAGS.data_dir, FLAGS.embedding_file)
+    embedding      = load_embedding(embedding_file)
+    print("Master, GLOVE Done")
+  else:
+    print("Master, Not using GLOVE")
   
   en_vocab_path       = os.path.join(FLAGS.data_dir, "vocab%d.in"  % FLAGS.en_vocab_size)
   fr_vocab_path       = os.path.join(FLAGS.data_dir, "vocab%d.out" % FLAGS.fr_vocab_size)
   _, rev_en_vocab     = data_utils.initialize_vocabulary(en_vocab_path)
   _, rev_fr_vocab     = data_utils.initialize_vocabulary(fr_vocab_path)
 
-
-  decoder_embedding_matrix = get_embedding_matrix(embedding, FLAGS.embedding_size, rev_fr_vocab, FLAGS.fr_vocab_size)
-  encoder_embedding_matrix = get_embedding_matrix(embedding, FLAGS.embedding_size, rev_en_vocab, FLAGS.en_vocab_size)
-
+  if FLAGS.use_glove:
+    decoder_embedding_matrix = get_embedding_matrix(embedding, FLAGS.embedding_size, rev_fr_vocab, FLAGS.fr_vocab_size)
+    encoder_embedding_matrix = get_embedding_matrix(embedding, FLAGS.embedding_size, rev_en_vocab, FLAGS.en_vocab_size)
+  else:
+    decoder_embedding_matrix = None
+    encoder_embedding_matrix = None
+  
   # freeing the memory for embedding
   embedding = None
 
@@ -242,25 +271,32 @@ def train():
   # each PAD,GO etc introduced a new dimension
   FLAGS.embedding_size = FLAGS.embedding_size + 4
 
-  with tf.Session() as sess:
+  config = tf.ConfigProto()
+  config.gpu_options.allow_growth = True
+  
+  with tf.Session(config=config) as sess:
     
     # Create model.
-    print("Creating Model")
-    model = create_model(sess, encoder_embedding_matrix, decoder_embedding_matrix)
-    
+    model  = create_model(sess, encoder_embedding_matrix, decoder_embedding_matrix)
+    writer = tf.summary.FileWriter(FLAGS.model_dir, graph=sess.graph)
+
     # Read data into buckets and compute their sizes.
-    print ("Reading development and training data (limit: %d)."% FLAGS.max_train_data_size)
-    print("en_dev Path : " + en_dev )
-    print("fr_dev Path : " + fr_dev )
-    dev_set = read_data(en_dev, fr_dev)
-    dev_bucket_sizes = [len(dev_set[b]) for b in range(len(_buckets))]
-    print("Development Data read !")
+    print("Reading development and training data (limit: %d)."% FLAGS.max_train_data_size)
+    # print("en_dev Path : " + en_dev )
+    # print("fr_dev Path : " + fr_dev )
+    # dev_set = read_data(en_dev, fr_dev)
+    # dev_bucket_sizes = [len(dev_set[b]) for b in range(len(_buckets))]
+    print("Master, didn't read Development Data!")
+    
+    print("enInputPath > {}".format(en_train))
+    print("frInputPath > {}".format(fr_train))
+
     train_set = read_data(en_train, fr_train, FLAGS.max_train_data_size)
     print("Training Data read")
     train_bucket_sizes = [len(train_set[b]) for b in range(len(_buckets))]
-    
+    print("Train bucket sizes > {}".format(train_bucket_sizes))
     train_total_size = float(sum(train_bucket_sizes))
-
+    
     # A bucket scale is a list of increasing numbers from 0 to 1 that we'll use
     # to select a bucket. Length of [scale[i], scale[i+1]] is proportional to
     # the size if i-th training bucket, as used later.
@@ -269,11 +305,9 @@ def train():
 
     # This is the training loop.
     step_time, loss = 0.0, 0.0
-    current_step = 0
+    current_step = model.global_step.eval()
     previous_losses = []
     model_checkpoint_list = [] # maintain list of past checkpoints
-
-
 
     while current_step < MAX_ITERATION_COUNT:
       # Choose a bucket according to data distribution. We pick a random number
@@ -284,22 +318,28 @@ def train():
                        if train_buckets_scale[i] > random_number_01])
 
       # Get a batch and make a step.
-      start_time = time.time()
       encoder_inputs, encoder_input_len, decoder_inputs, decoder_targets, decoder_input_len, loss_weights = model.get_batch(train_set, bucket_id, _buckets, FLAGS.batch_size)
       loss_track = []
-      
+      start_time = time.time()
       fd = model.make_input_data_feed_dict(encoder_inputs, encoder_input_len, decoder_inputs, decoder_targets, decoder_input_len, loss_weights, FLAGS.input_keep_prob, FLAGS.output_keep_prob, FLAGS.state_keep_prob)
       # fd_inference = model.make_inference_inputs_II(encoder_inputs, encoder_input_len)
       # run model 
-      _ , loss = sess.run([model.train_op, model.loss], fd)
+      _ , loss, summary = sess.run([model.train_op, model.loss, model.merged], fd)
       # break
-      if current_step % FLAGS.steps_per_checkpoint == 0:
-        print("Current Step > {}".format(model.global_step.eval()))
-        print("Loss > {}".format(loss))
-        loss_track.append(loss)
+      writer.add_summary(summary, current_step)
+      time_taken = time.time()-start_time
 
+      if current_step % FLAGS.steps_per_checkpoint == 0:
+        print("Time taken > {}".format(time_taken*FLAGS.steps_per_checkpoint))
+        print("Current Step > {0}, Learning Rate > {1}".format(model.global_step.eval(), model.learning_rate()))
+        print("Loss > {}".format(loss))
+        print("last 2 losses : {0} {1}", loss_track[-2:])
+        if len(loss_track) > 2 and loss > max(loss_track[-2:]):
+          sess.run(model.learning_rate_decay_op)
+
+        loss_track.append(loss)
         # save model  
-        print("Master, Going to Save Model !")
+        print("Master, Going to Save Model!")
         model_checkpoint_path = os.path.join(FLAGS.model_dir, "my-model")
         model.saver.save(sess, model_checkpoint_path, global_step = model.global_step) 
         print("Master, Saving Successful !")
@@ -315,10 +355,9 @@ def train():
 
             if i >= 10:
                 break
-
-      # step_time += (time.time() - start_time) / FLAGS.steps_per_checkpoint
+      sys.stdout.flush()
+      step_time += (time.time() - start_time) / FLAGS.steps_per_checkpoint
       current_step += 1
-
 
 
 def test():
@@ -329,7 +368,7 @@ def test():
     model = create_model(sess)
 
     step_time, loss = 0.0, 0.0
-    current_step = 0
+    current_step = model.global_step.eval()
     previous_losses = []
     model_checkpoint_list = [] # maintain list of past checkpoints
 
@@ -340,12 +379,16 @@ def test():
       loss_track = []
       fd = model.make_input_data_feed_dict(encoder_inputs, encoder_input_len, decoder_inputs, decoder_targets, decoder_input_len, loss_weights, FLAGS.input_keep_prob, FLAGS.output_keep_prob, FLAGS.state_keep_prob)
       _ , loss = sess.run([model.train_op, model.loss], fd)
+
       # break
       if current_step % FLAGS.steps_per_checkpoint == 0:
-        print("Current Step > {}".format(model.global_step.eval()))
+        print("Current Step > {0}, Learning Rate > {1}".format(model.global_step.eval(), model.learning_rate()))
         print("Loss > {}".format(loss))
-        loss_track.append(loss)
 
+        if len(loss_track) > 2 and loss > max(loss_track[-3:]):
+          sess.run(model.learning_rate_decay_op)
+        
+        loss_track.append(loss)
         # save model  
         # print("Master, Going to Save Model !")
         # model_checkpoint_path = os.path.join(FLAGS.model_dir, "my-model")
@@ -369,20 +412,63 @@ def test():
 
 
 def decode():
-  print("Not Implemented")
-  print("Exiting Decoder")
 
+  config = tf.ConfigProto()
+  config.gpu_options.allow_growth = True
 
+  with tf.Session(config=config) as sess:
+    # with tf.variable_scope("decode"):
+    # Create model and load parameters.
+    model = create_model(sess, True)
+    model.batch_size = 1  # We decode one sentence at a time.
 
+    # Load vocabularies.
+    en_vocab_path   = os.path.join(FLAGS.data_dir,"vocab%d.in" % FLAGS.en_vocab_size)
+    fr_vocab_path   = os.path.join(FLAGS.data_dir,"vocab%d.out" % FLAGS.fr_vocab_size)
+    en_vocab, _     = data_utils.initialize_vocabulary(en_vocab_path)
+    _, rev_fr_vocab = data_utils.initialize_vocabulary(fr_vocab_path)
 
+    # input_file  = os.path.join(FLAGS.data_dir, FLAGS.test_file)
+    input_file  = os.path.join(FLAGS.data_dir, "dev.in")
+    reader = open(input_file, "rb")
 
+    output_file = os.path.join(FLAGS.data_dir, "output_generated.txt")
+    writer = open(output_file, "w")
+    
+    sentences = reader.readlines()
+    count = 0
 
+    for sentence in sentences:
+      # sentence = sentence.decode("utf-8")  
+      # Get token-ids for the input sentence.
+      
+      print(count)
+      count=count+1
+      try:
+        # sentence = sys.stdin.readline()
+        print(count)
+        token_ids = data_utils.sentence_to_token_ids(tf.compat.as_bytes(sentence), en_vocab)
+        
+        feed_dict = {}
+        feed_dict[model.encoder_inputs] = [token_ids]
+        feed_dict[model.encoder_inputs_length] = [len(token_ids)]
 
-
-
-
-
-
+        output = sess.run(model.decoder_prediction_inference, feed_dict)
+        # This is a greedy decoder - outputs are just argmaxes of output_logits.
+        # If there is an EOS symbol in outputs, cut them at that point.
+        # if data_utils.EOS_ID in outputs:
+        #   outputs = outputs[:outputs.index(data_utils.EOS_ID)]
+        # Print out French sentence corresponding to outputs.
+        _output=" ".join([tf.compat.as_str(rev_fr_vocab[output]) for output in outputs])
+        # writer.write(_output)
+        print(_output)
+        # writer.write("\n")
+        # print(" ".join([tf.compat.as_str(rev_fr_vocab[output]) for output in outputs]))
+        # print("> ", end="")
+        # sys.stdout.flush()
+        # sentence = sys.stdin.readline()
+      except Exception as e:
+        print("Master, I couldn't do it :(")
 
 
 
